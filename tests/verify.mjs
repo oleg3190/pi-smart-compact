@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.4.0');
+assert.equal(pkg.version, '3.4.1');
 assert.deepEqual(pkg.pi.extensions, ['./src/index.ts']);
 assert.match(source, /const formattedById = new Map<string, string>\(\)/);
 assert.match(source, /let expandedSerializedChars = 0/);
