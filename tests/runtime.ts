@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import smartCompact from "../src/index.ts";
 
-function makeHarness(initialEntries = []) {
+function makeHarness(initialEntries = [], appendMode = "normal") {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
@@ -18,7 +18,13 @@ function makeHarness(initialEntries = []) {
       commands.set(name, definition);
     },
     appendEntry(customType, data) {
+      if (appendMode === "throw-before-persist") {
+        throw new Error("append failure before persistence");
+      }
       branch.push({ type: "custom", customType, data });
+      if (appendMode === "throw-after-persist") {
+        throw new Error("append failure after persistence");
+      }
     },
   };
 
@@ -43,6 +49,46 @@ function makeHarness(initialEntries = []) {
 async function start(h) {
   await h.handlers.get("session_start")?.({ reason: "startup" }, h.ctx);
 }
+
+const malformedReason = makeHarness([
+  {
+    type: "custom",
+    customType: "smart-compact-pinned-event",
+    data: {
+      version: 3,
+      op: "revoke",
+      id: "cf_bad_reason",
+      at: Date.now(),
+      reason: "x".repeat(501),
+    },
+  },
+]);
+await assert.doesNotReject(() => start(malformedReason));
+const malformedList = await list(malformedReason);
+assert.match(malformedList.content[0].text, /Pinned facts not found\./);
+
+const recoveredAfterPersist = makeHarness([], "throw-after-persist");
+await start(recoveredAfterPersist);
+const recovered = await checkpoint(recoveredAfterPersist, {
+  type: "finding",
+  fact: "Persisted despite append error.",
+});
+assert.ok(recovered.details.id);
+assert.equal(recoveredAfterPersist.branch.length, 1);
+const recoveredList = await list(recoveredAfterPersist, { includeText: true });
+assert.match(recoveredList.content[0].text, /Persisted despite append error\./);
+
+const failedBeforePersist = makeHarness([], "throw-before-persist");
+await start(failedBeforePersist);
+await assert.rejects(
+  () => checkpoint(failedBeforePersist, {
+    type: "finding",
+    fact: "Must not appear after failed persistence.",
+  }),
+  /append failure before persistence/,
+);
+const failedList = await list(failedBeforePersist);
+assert.match(failedList.content[0].text, /Pinned facts not found\./);
 
 function tool(h, name) {
   const definition = h.tools.get(name);
