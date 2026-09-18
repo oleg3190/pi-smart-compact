@@ -26,3 +26,24 @@ pi install git:github.com/oleg3190/pi-smart-compact
 The package entry point is `./src/index.ts`.
 
 Pinned facts are branch-scoped and persisted in Pi's session journal. Fact text is framed as untrusted quoted data in LLM-facing context.
+
+## Effectiveness benchmark
+
+Run the deterministic packing benchmark with:
+
+```bash
+npm run bench
+```
+
+The benchmark compares the production context handler with an unbounded full-fact baseline and verifies:
+- pressure compression;
+- full recall of high-priority facts;
+- stale/revoked fact exclusion;
+- branch isolation;
+- untrusted-data framing;
+- snapshot replay equivalence;
+- the hard 10,000-character context budget.
+
+CI requires at least 15% weighted token reduction on the pressure scenarios while keeping required-fact recall at 100%, stale leakage at 0%, and replay/context-budget checks green.
+
+The benchmark intentionally does not call an external LLM in CI. Model-level task success should be measured separately with the same scenarios once a fixed model/evaluation endpoint is available.
