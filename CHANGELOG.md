@@ -1,6 +1,8 @@
 # Changelog
 
 ## 3.4.2 — 2026-09-18
+- Added deterministic effectiveness benchmark for pressure compression, priority recall, stale/revoke exclusion, branch isolation, adversarial framing, and snapshot replay.
+- CI now executes `npm run bench` and enforces objective packing/reliability thresholds.
 
 ### Reliability
 - Made persisted-event reason validation non-throwing for malformed journal data.
