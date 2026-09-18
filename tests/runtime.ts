@@ -78,11 +78,20 @@ const added = await checkpoint(first, {
 const firstId = added.details.id;
 assert.match(firstId, /^cf_/);
 
+const contextBeforeRevision = first.handlers.get("context")({ messages: [] }, first.ctx);
+assert.ok(contextBeforeRevision?.messages?.[0]?.content);
+assert.match(contextBeforeRevision.messages[0].content, /Use Postgres transactions for durable writes/);
+
 await revise(first, {
   id: firstId,
   fact: "Use Postgres transactions with SERIALIZABLE isolation for durable writes.",
   reason: "Isolation requirement clarified",
 });
+
+const contextAfterRevision = first.handlers.get("context")({ messages: [] }, first.ctx);
+assert.ok(contextAfterRevision?.messages?.[0]?.content);
+assert.match(contextAfterRevision.messages[0].content, /SERIALIZABLE isolation/);
+assert.doesNotMatch(contextAfterRevision.messages[0].content, /Use Postgres transactions for durable writes\.<\\/fact>/);
 
 const duplicate = await checkpoint(first, {
   type: "decision",
