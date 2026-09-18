@@ -2,11 +2,12 @@
 
 Branch-scoped pinned memory for Pi with deterministic journal replay, hard context budgets, injection-resistant fact framing, and token-efficient context packing.
 
-## 3.4.1
+## 3.4.2
 
-- Fixed the CI verification regex for optional chaining in context-cache checks.
-- CI runs TypeScript validation before runtime tests and enables npm cache.
-- Runtime coverage now verifies context-cache invalidation after checkpoint revision.
+- Hardened replay validation against malformed oversized audit reasons.
+- Enforced active-fact limits and canonical uniqueness on V3 snapshots.
+- Added runtime coverage for append-entry recovery and invalid journal payloads.
+- CI runs TypeScript validation before runtime tests.
 
 ## 3.4.0
 
