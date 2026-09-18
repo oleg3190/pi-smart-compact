@@ -1377,7 +1377,7 @@ export default function (pi: ExtensionAPI) {
 
   function getContextBlock(): { text: string; cost: ContextCost } {
     if (cachedContextBlock?.revision === stateRevision) return cachedContextBlock.result;
-    const result = getContextBlock();
+    const result = buildContextBlock(activeFacts());
     cachedContextBlock = { revision: stateRevision, result };
     return result;
   }
