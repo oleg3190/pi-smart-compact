@@ -209,7 +209,7 @@ function pressureFacts() {
       type: critical ? "decision" : "finding",
       text: critical
         ? `Critical benchmark requirement ${i + 1}: the release must preserve durable transaction semantics and validate this exact requirement.`
-        : `Low-priority noise fact ${i + 1}: ${"background implementation detail ".repeat(5).trim()}.`,
+        : `Low-priority noise fact ${i + 1}: ${"background implementation detail ".repeat(7).trim()}.`,
     }));
   }
   return facts;
@@ -225,7 +225,7 @@ function priorityFacts() {
       type: critical ? "approved_spec" : "finding",
       text: critical
         ? `Required acceptance criterion ${i + 1}: preserve API compatibility and deterministic replay for this benchmark.`
-        : `Low-value repository observation ${i + 1}: ${"secondary note ".repeat(6).trim()}.`,
+        : `Low-value repository observation ${i + 1}: ${"secondary note ".repeat(9).trim()}.`,
     }));
   }
   return facts;
