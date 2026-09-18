@@ -23,7 +23,8 @@
   },
   "scripts": {
     "check": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types tests/runtime.ts && node tests/verify.mjs"
+    "test": "node --experimental-strip-types tests/runtime.ts && node tests/verify.mjs",
+    "bench": "node --experimental-strip-types bench/run.mjs"
   },
   "devDependencies": {
     "@types/node": "22.19.19",
