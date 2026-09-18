@@ -124,7 +124,7 @@ assert.equal(durableEvents.length, 3);
 const addEvent = durableEvents[0];
 const rev2 = durableEvents[1];
 const rev3 = durableEvents[2];
-const staleReplay = makeHarness([addEvent, rev3, rev2]);
+const staleReplay = makeHarness([addEvent, rev2, rev3, rev2]);
 await start(staleReplay);
 const staleList = await list(staleReplay, { includeText: true });
 assert.match(staleList.content[0].text, /Revision three/);
