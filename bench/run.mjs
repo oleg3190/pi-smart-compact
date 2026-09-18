@@ -31,7 +31,7 @@ function xmlEscape(text) {
 }
 
 function factXml(fact) {
-  return \`<fact id="\${fact.id}" type="\${fact.type}" p="\${fact.priority}"\${fact.hot ? " hot" : ""}>\${xmlEscape(fact.text)}</fact>\`;
+  return `<fact id="${fact.id}" type="${fact.type}" p="${fact.priority}"${fact.hot ? " hot" : ""}>${xmlEscape(fact.text)}</fact>`;
 }
 
 function compareFacts(a, b) {
@@ -45,16 +45,16 @@ function compareFacts(a, b) {
 function fullContext(facts) {
   if (facts.length === 0) return "";
   const body = [...facts].sort(compareFacts).map(factXml).join("\n");
-  return \`\${HEADER}\n\${body}\n\n\${FOOTER}\`;
+  return `${HEADER}\n${body}\n\n${FOOTER}`;
 }
 
 function makeFact(index, {
   priority = 10,
   hot = false,
   type = "finding",
-  text = \`Synthetic benchmark fact \${index}: \${"context ".repeat(20).trim()}.\`,
+  text = `Synthetic benchmark fact ${index}: ${"context ".repeat(20).trim()}.`,
 } = {}) {
-  const id = \`cf_bench_\${String(index).padStart(3, "0")}\`;
+  const id = `cf_bench_${String(index).padStart(3, "0")}`;
   const timestamp = BASE_TIME + index;
   return {
     id,
@@ -166,17 +166,17 @@ function metricScenario({ name, entries, activeFacts, requiredFullIds = [], forb
     const compactTokens = estimateTokens(compact);
     const requiredChecks = requiredFullIds.map((id) => {
       const fact = activeFacts.find((item) => item.id === id);
-      assert.ok(fact, \`required fact \${id} missing from expected state\`);
+      assert.ok(fact, `required fact ${id} missing from expected state`);
       return compact.includes(factXml(fact));
     });
     const forbiddenChecks = forbidden.map((text) => !compact.includes(text));
-    const branchChecks = branchOnlyIds.map((id) => compact.includes(\`id="\${id}"\`));
+    const branchChecks = branchOnlyIds.map((id) => compact.includes(`id="${id}"`));
 
-    assert.ok(compact.length <= CONTEXT_BUDGET, \`\${name}: context exceeds hard budget\`);
+    assert.ok(compact.length <= CONTEXT_BUDGET, `${name}: context exceeds hard budget`);
     assert.match(compact, /untrusted persisted data/);
-    assert.ok(requiredChecks.every(Boolean), \`\${name}: required full fact missing\`);
-    assert.ok(forbiddenChecks.every(Boolean), \`\${name}: forbidden stale/injected text leaked\`);
-    assert.ok(branchChecks.every(Boolean), \`\${name}: branch-local fact missing\`);
+    assert.ok(requiredChecks.every(Boolean), `${name}: required full fact missing`);
+    assert.ok(forbiddenChecks.every(Boolean), `${name}: forbidden stale/injected text leaked`);
+    assert.ok(branchChecks.every(Boolean), `${name}: branch-local fact missing`);
 
     return {
       name,
@@ -208,8 +208,8 @@ function pressureFacts() {
       hot: critical,
       type: critical ? "decision" : "finding",
       text: critical
-        ? \`Critical benchmark requirement \${i + 1}: the release must preserve durable transaction semantics and validate this exact requirement.\`
-        : \`Low-priority noise fact \${i + 1}: \${"background implementation detail ".repeat(5).trim()}.\`,
+        ? `Critical benchmark requirement ${i + 1}: the release must preserve durable transaction semantics and validate this exact requirement.`
+        : `Low-priority noise fact ${i + 1}: ${"background implementation detail ".repeat(5).trim()}.`,
     }));
   }
   return facts;
@@ -224,8 +224,8 @@ function priorityFacts() {
       hot: critical,
       type: critical ? "approved_spec" : "finding",
       text: critical
-        ? \`Required acceptance criterion \${i + 1}: preserve API compatibility and deterministic replay for this benchmark.\`
-        : \`Low-value repository observation \${i + 1}: \${"secondary note ".repeat(6).trim()}.\`,
+        ? `Required acceptance criterion ${i + 1}: preserve API compatibility and deterministic replay for this benchmark.`
+        : `Low-value repository observation ${i + 1}: ${"secondary note ".repeat(6).trim()}.`,
     }));
   }
   return facts;
@@ -237,7 +237,7 @@ function revisionFacts() {
     hot: i === 0,
     text: i === 0
       ? "Current decision: use serializable transactions for durable writes."
-      : \`Revision scenario background fact \${i}: \${"stable context ".repeat(8).trim()}.\`,
+      : `Revision scenario background fact ${i}: ${"stable context ".repeat(8).trim()}.`,
   }));
   const revised = {
     ...facts[0],
@@ -370,7 +370,7 @@ async function main() {
   const allBranchChecksOk = oracleScenarios.every((result) => result.branchChecks);
   const maxContextMs = Math.max(...oracleScenarios.map((result) => result.contextMs));
 
-  assert.ok(pressureTokenReduction >= 0.15, \`pressure compression regression: \${(pressureTokenReduction * 100).toFixed(1)}% < 15%\`);
+  assert.ok(pressureTokenReduction >= 0.15, `pressure compression regression: ${(pressureTokenReduction * 100).toFixed(1)}% < 15%`);
   assert.equal(minRecall, 1, "required full-fact recall regressed");
   assert.equal(maxLeakage, 0, "stale/adversarial text leakage detected");
   assert.ok(allBudgetOk, "hard context budget regression");
