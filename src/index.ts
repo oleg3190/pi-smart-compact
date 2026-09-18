@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
 /**
- * smart-compact v3.3.1 production
+ * smart-compact v3.4.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -17,6 +17,11 @@ import { StringEnum } from "@earendil-works/pi-ai";
  * - exact character budgets without destructive slicing
  * - injection-resistant persisted-data framing
  *
+ * v3.4.0: memoized context assembly by state revision, plus linear-time
+ *         compaction probes. Unchanged LLM context is now returned from a
+ *         cache instead of being rebuilt on every context/status/tool call.
+ *         Compaction probes reuse accumulated serialized text rather than
+ *         rebuilding the selected prefix on every fact.
  * v3.3.1: context probe optimization — precompute serialized fact strings
  *         once per context build and use an O(1) length check for the first
  *         priority-expansion pass. This removes repeated candidate assembly
@@ -634,11 +639,17 @@ export default function (pi: ExtensionAPI) {
   let revokedTombstones = new Map<string, Tombstone>();
   let journalWarnings: string[] = [];
   let mutationsSinceSnapshot = 0;
+  let stateRevision = 0;
+  let cachedContextBlock:
+    | { revision: number; result: { text: string; cost: ContextCost } }
+    | undefined;
 
   let lastWarningSignature = "";
   let nearLimitNotified = false;
 
   function clearState(): void {
+    stateRevision++;
+    cachedContextBlock = undefined;
     pinnedFacts.clear();
     revokedTombstones.clear();
     journalWarnings = [];
@@ -910,7 +921,11 @@ export default function (pi: ExtensionAPI) {
 
   function applyEventChecked(event: PinnedEventV3): boolean {
     const applied = applyEventInMemory(event);
-    if (applied) assertStateInvariants();
+    if (applied) {
+      stateRevision++;
+      cachedContextBlock = undefined;
+      assertStateInvariants();
+    }
     return applied;
   }
 
@@ -1360,6 +1375,13 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
+  function getContextBlock(): { text: string; cost: ContextCost } {
+    if (cachedContextBlock?.revision === stateRevision) return cachedContextBlock.result;
+    const result = getContextBlock();
+    cachedContextBlock = { revision: stateRevision, result };
+    return result;
+  }
+
   function renderCompactionFacts(facts: readonly PinnedFact[], budgetChars = COMPACT_FACT_CHARS): string {
     if (facts.length === 0) return "";
 
@@ -1376,56 +1398,68 @@ export default function (pi: ExtensionAPI) {
     const omitted: PinnedFact[] = [];
     const fullById = new Map<string, string>();
     const previewById = new Map<string, string>();
+
     for (const fact of facts) {
       fullById.set(fact.id, formatFactXML(fact));
       previewById.set(fact.id, formatPreviewFactLine(fact));
     }
 
-    const fullText = (items: readonly PinnedFact[]): string =>
-      items.map((fact) => fullById.get(fact.id) ?? "").join("\n");
-    const previewText = (items: readonly PinnedFact[]): string =>
-      items.map((fact) => previewById.get(fact.id) ?? "").join("\n");
+    // Reuse accumulated serialized text instead of reconstructing the selected
+    // prefix on every probe. Each fact is probed in O(1) string assembly.
+    let selectedFullText = "";
+    let selectedPreviewText = "";
 
     for (const fact of sortByContextPriority(facts)) {
-      const probeFull = [...selectedFull, fact].map((item) => fullById.get(item.id) ?? "").join("\n");
-      const candidateFull = `${header}\n${probeFull || "(none)"}\n\n${footer}`;
+      const full = fullById.get(fact.id);
+      const preview = previewById.get(fact.id);
+      if (full === undefined || preview === undefined) {
+        throw new Error(`smart-compact: missing compaction serialization for ${fact.id}`);
+      }
+
+      const candidateFullText = selectedFullText ? `${selectedFullText}\n${full}` : full;
+      const candidateFull = `${header}\n${candidateFullText || "(none)"}\n\n${footer}`;
+
       if ((fact.hot || fact.priority >= 90) && candidateFull.length <= budgetChars) {
         selectedFull.push(fact);
+        selectedFullText = candidateFullText;
         continue;
       }
 
-      const probePreview = [...selectedPreview, fact].map((item) => previewById.get(item.id) ?? "").join("\n");
+      const candidatePreviewText = selectedPreviewText ? `${selectedPreviewText}\n${preview}` : preview;
       const candidatePreview = [
         header,
-        selectedFull.length ? fullText(selectedFull) : "(none)",
-        selectedPreview.length || probePreview ? "\nOther active facts (preview):" : "",
-        probePreview,
+        selectedFullText || "(none)",
+        candidatePreviewText ? "Other active facts (preview):" : "",
+        candidatePreviewText,
         footer,
       ].filter(Boolean).join("\n");
 
-      if (candidatePreview.length <= budgetChars) selectedPreview.push(fact);
-      else omitted.push(fact);
+      if (candidatePreview.length <= budgetChars) {
+        selectedPreview.push(fact);
+        selectedPreviewText = candidatePreviewText;
+      } else {
+        omitted.push(fact);
+      }
     }
 
-    let lines = [
-      header,
-      selectedFull.length ? fullText(selectedFull) : "(none)",
-    ];
-    if (selectedPreview.length) lines.push("", "Other active facts (preview):", previewText(selectedPreview));
-    if (omitted.length) lines.push("", "Additional facts omitted due to budget limit:", ...omitted.map(f => `- ${f.id} (${f.type})`));
-    lines.push(footer);
+    const buildResult = (): string => {
+      const lines = [header, selectedFullText || "(none)"];
+      if (selectedPreviewText) lines.push("", "Other active facts (preview):", selectedPreviewText);
+      if (omitted.length) {
+        lines.push(
+          "",
+          "Additional facts omitted due to budget limit:",
+          ...omitted.map(f => `- ${f.id} (${f.type})`),
+        );
+      }
+      lines.push(footer);
+      return lines.join("\n");
+    };
 
-    let result = lines.join("\n");
+    let result = buildResult();
     while (result.length > budgetChars && omitted.length) {
       omitted.pop();
-      lines = [
-        header,
-        selectedFull.length ? fullText(selectedFull) : "(none)",
-      ];
-      if (selectedPreview.length) lines.push("", "Other active facts (preview):", previewText(selectedPreview));
-      if (omitted.length) lines.push("", "Additional facts omitted due to budget limit:", ...omitted.map(f => `- ${f.id} (${f.type})`));
-      lines.push(footer);
-      result = lines.join("\n");
+      result = buildResult();
     }
 
     if (result.length <= budgetChars) return result;
@@ -1513,7 +1547,7 @@ export default function (pi: ExtensionAPI) {
 
   function updateStatus(ctx: ExtensionContext): void {
     if (!ctx.hasUI) return;
-    const { cost } = buildContextBlock(activeFacts());
+    const { cost } = getContextBlock();
     const diagnosticSuffix = journalWarnings.length > 0 ? ` · ⚠${journalWarnings.length}` : "";
     const expK = (cost.expandedChars / 1000).toFixed(1);
     const idxK = (cost.indexChars / 1000).toFixed(1);
@@ -1618,7 +1652,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("context", (event) => {
-    const { text } = buildContextBlock(activeFacts());
+    const { text } = getContextBlock();
     if (!text) return;
     return {
       messages: [
@@ -1666,7 +1700,7 @@ export default function (pi: ExtensionAPI) {
             id: duplicate.id,
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
             hot: duplicate.hot,
             priority: duplicate.priority,
             duplicate: true,
@@ -1681,7 +1715,7 @@ export default function (pi: ExtensionAPI) {
             operation: "add",
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1709,7 +1743,7 @@ export default function (pi: ExtensionAPI) {
           id: fact.id,
           pinnedFactsCount: pinnedFacts.size,
           pinnedChars: pinnedChars(),
-          contextCost: buildContextBlock(activeFacts()).cost,
+          contextCost: getContextBlock().cost,
           hot: fact.hot,
           priority: fact.priority,
         } satisfies CheckpointDetails,
@@ -1745,7 +1779,7 @@ export default function (pi: ExtensionAPI) {
             operation: "revise",
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1769,7 +1803,7 @@ export default function (pi: ExtensionAPI) {
             id: params.id,
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1782,7 +1816,7 @@ export default function (pi: ExtensionAPI) {
             id: params.id,
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1796,7 +1830,7 @@ export default function (pi: ExtensionAPI) {
             id: params.id,
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1830,7 +1864,7 @@ export default function (pi: ExtensionAPI) {
           id: params.id,
           pinnedFactsCount: pinnedFacts.size,
           pinnedChars: pinnedChars(),
-          contextCost: buildContextBlock(activeFacts()).cost,
+          contextCost: getContextBlock().cost,
         } satisfies CheckpointDetails,
       };
     },
@@ -1858,7 +1892,7 @@ export default function (pi: ExtensionAPI) {
             operation: "forget",
             pinnedFactsCount: pinnedFacts.size,
             pinnedChars: pinnedChars(),
-            contextCost: buildContextBlock(activeFacts()).cost,
+            contextCost: getContextBlock().cost,
           } satisfies CheckpointDetails,
         };
       }
@@ -1874,7 +1908,7 @@ export default function (pi: ExtensionAPI) {
           id: params.id,
           pinnedFactsCount: pinnedFacts.size,
           pinnedChars: pinnedChars(),
-          contextCost: buildContextBlock(activeFacts()).cost,
+          contextCost: getContextBlock().cost,
         } satisfies CheckpointDetails,
       };
     },
@@ -1909,7 +1943,7 @@ export default function (pi: ExtensionAPI) {
           id: params.id,
           pinnedFactsCount: pinnedFacts.size,
           pinnedChars: pinnedChars(),
-          contextCost: buildContextBlock(activeFacts()).cost,
+          contextCost: getContextBlock().cost,
         } satisfies CheckpointDetails,
       };
     },
