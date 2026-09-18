@@ -1768,7 +1768,15 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
       if (!isValidId(params.id)) {
-        return { content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }] };
+        return {
+          content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }],
+          details: {
+            operation: "revise",
+            pinnedFactsCount: pinnedFacts.size,
+            pinnedChars: pinnedChars(),
+            contextCost: getContextBlock().cost,
+          } satisfies CheckpointDetails,
+        };
       }
 
       const current = pinnedFacts.get(params.id);
@@ -1882,7 +1890,15 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
       if (!isValidId(params.id)) {
-        return { content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }] };
+        return {
+          content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }],
+          details: {
+            operation: "forget",
+            pinnedFactsCount: pinnedFacts.size,
+            pinnedChars: pinnedChars(),
+            contextCost: getContextBlock().cost,
+          } satisfies CheckpointDetails,
+        };
       }
 
       if (!pinnedFacts.has(params.id)) {
