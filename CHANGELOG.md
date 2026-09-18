@@ -1,23 +1,21 @@
 # Changelog
 
-## 3.3.1
+## 3.4.0 — 2026-09-18
 
 ### Performance
+- Added state-revision memoization for context assembly.
+- Removed repeated prefix reconstruction from compaction probes.
 
-- Precompute fact XML, compact index lines, and hot-fact preview lines once per `context` build.
-- Replace the first-pass candidate-string probe with an O(1) character-budget calculation per fact.
-- Keep the exact hard character budget and priority ordering unchanged.
-- Reuse cached serialized representations while building compaction instructions.
+### Reliability
+- Added runtime replay/snapshot/duplicate/stale-revision tests.
+- Added a 50-fact hard context-budget stress test.
+- Pinned runtime and development dependency versions.
 
-### Correctness
+### CI
+- Fixed the initial workflow failure caused by npm cache configuration without a lockfile.
+- CI now performs a real install, runtime tests, and strict TypeScript checking.
 
-- Fix strict-TypeScript inference in the localization helper by explicitly typing the mutable message as `string`.
-
-### Preserved from 3.3.0
-
-- Compact fact XML (`p`, optional `hot`, no `updated`, inline text).
-- Removal of the old 8-iteration fixed-point loop.
-- Concise context security warning.
-- Date-free context index lines.
-- Tool-named `promptGuidelines`.
-- Concise compaction header.
+## 3.3.1
+- Precomputed serialized fact strings during context packing.
+- Removed the old fixed-point candidate loop.
+- Reduced LLM-facing context framing overhead.
