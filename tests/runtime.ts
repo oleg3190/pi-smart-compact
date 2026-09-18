@@ -91,7 +91,7 @@ await revise(first, {
 const contextAfterRevision = first.handlers.get("context")({ messages: [] }, first.ctx);
 assert.ok(contextAfterRevision?.messages?.[0]?.content);
 assert.match(contextAfterRevision.messages[0].content, /SERIALIZABLE isolation/);
-assert.doesNotMatch(contextAfterRevision.messages[0].content, /Use Postgres transactions for durable writes\.<\\/fact>/);
+assert.doesNotMatch(contextAfterRevision.messages[0].content, /<fact[^>]*>Use Postgres transactions for durable writes\.<\/fact>/);
 
 const duplicate = await checkpoint(first, {
   type: "decision",
