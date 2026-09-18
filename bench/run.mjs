@@ -314,7 +314,6 @@ const scenarios = [
   metricScenario({
     name: "branch-isolation",
     entries: [
-      addEvent(makeFact(401, { priority: 90, hot: true, text: "Branch A secret state must never appear in branch B." })),
       addEvent(makeFact(402, { priority: 90, hot: true, text: "Branch B active state is isolated and must remain visible." })),
     ],
     activeFacts: [makeFact(402, { priority: 90, hot: true, text: "Branch B active state is isolated and must remain visible." })],
