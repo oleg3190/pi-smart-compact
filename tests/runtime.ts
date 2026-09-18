@@ -69,6 +69,14 @@ async function list(h, params = {}) {
 const first = makeHarness();
 await start(first);
 
+const invalidRevision = await revise(first, { id: "bad-id", fact: "ignored" });
+assert.equal(invalidRevision.details?.operation, "revise");
+assert.equal(invalidRevision.details?.pinnedFactsCount, 0);
+
+const invalidForget = await forget(first, { id: "bad-id" });
+assert.equal(invalidForget.details?.operation, "forget");
+assert.equal(invalidForget.details?.pinnedFactsCount, 0);
+
 const added = await checkpoint(first, {
   type: "decision",
   fact: "Use Postgres transactions for durable writes.",
