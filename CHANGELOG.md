@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.4.2 — 2026-09-18
+
+### Reliability
+- Made persisted-event reason validation non-throwing for malformed journal data.
+- Enforced V3 snapshot active-fact count/size limits and canonical uniqueness.
+- Added runtime coverage for post-persistence and pre-persistence append failures.
+
+
 ## 3.4.1 — 2026-09-18
 
 ### Reliability
