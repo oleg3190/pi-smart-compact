@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.4.1 — 2026-09-18
+
+### Reliability
+- Fixed implementation verification for optional-chaining context-cache memoization.
+- Fixed Pi tool-result typing: invalid IDs now return the required `details` payload for `checkpoint_revise` and `checkpoint_forget`.
+- Added runtime coverage for cache invalidation after revision and invalid-ID result contracts.
+
+### CI
+- Runs strict TypeScript validation before runtime tests.
+- Removed npm cache configuration because the repository intentionally has no `package-lock.json`.
+
 ## 3.4.0 — 2026-09-18
 
 ### Performance
