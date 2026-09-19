@@ -1158,6 +1158,7 @@ async function runReplayArm(options, task, context, arm) {
       const assistant = session.messages.filter((message) => message?.role === "assistant").at(-1);
       responseText = textFromContent(assistant?.content);
     }
+    if (!responseText.trim()) throw new Error("Counterfactual replay produced an empty answer for the " + arm + " arm.");
     const activeModel = session.model;
     return {
       arm,
@@ -1212,10 +1213,7 @@ async function runReplayArbiter(options, task, baselineContext, compactContext, 
       }
     });
     await session.prompt(buildReplayEvaluatorPrompt(task.text, baselineContext, compactContext, baselineAnswer, compactAnswer));
-    if (!responseText) {
-      const assistant = session.messages.filter((message) => message?.role === "assistant").at(-1);
-      responseText = textFromContent(assistant?.content);
-    }
+    if (!responseText.trim()) throw new Error("Counterfactual replay evaluator returned an empty answer.");
     const parsed = parseJsonObject(responseText);
     const comparison = normalizeComparisonEvaluation(parsed);
     const activeModel = session.model;
@@ -1283,6 +1281,8 @@ function buildReplayRecommendations(comparison, baselineUsage, compactUsage) {
 }
 
 function buildCounterfactualReplayReport(task, baselineContext, compactContext, runtimeStatus, audit, baselineArm, compactArm, arbiter) {
+  assert.deepEqual(parseReplayModelSelection({ replayModel: "provider/model" }), { provider: "provider", modelId: "model" });
+
   const replayRecommendations = buildReplayRecommendations(arbiter.comparison, baselineArm.usage, compactArm.usage);
   const baselineUsage = baselineArm.usage;
   const compactUsage = compactArm.usage;
