@@ -7,6 +7,7 @@
 - Reports include actual reported input/output/total usage, latency, both generated answers, semantic quality deltas, and the evaluator's grounded comparison.
 - The replay intentionally excludes the historical dialogue so the compact context is tested as a replacement for durable context, not as an extra hint layered on top of the original conversation.
 - A single replay pair is an experimental estimate because model sampling may be nondeterministic.
+- Set `PI_REPLAY_MODEL`, `PI_REPLAY_PROVIDER`, and `PI_REPLAY_THINKING` to use a target model/config different from the semantic evaluator.
 
 ## 3.8.0
 
