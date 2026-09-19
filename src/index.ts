@@ -1,13 +1,22 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  SessionEntry,
+import {
+  SessionManager,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join, resolve as resolvePathname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
+const execFileAsync = promisify(execFile);
+
 /**
- * smart-compact v3.4.2 production
+ * smart-compact v3.7.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1628,6 +1637,257 @@ export default function (pi: ExtensionAPI) {
     return { hot, priority, priorityExplicit };
   }
 
+  type AnalyzeDialogRequest =
+    | { kind: "current" }
+    | { kind: "compact" }
+    | { kind: "compare"; target: string };
+
+  function parseAnalyzeDialogArgs(raw: string): AnalyzeDialogRequest {
+    const input = raw.trim();
+    if (!input) return { kind: "current" };
+
+    const firstSpace = input.indexOf(" ");
+    const command = (firstSpace === -1 ? input : input.slice(0, firstSpace)).toLowerCase();
+    const rest = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();
+
+    if (command === "compact") {
+      if (rest) throw new Error("Usage: /analyze-dialog compact");
+      return { kind: "compact" };
+    }
+
+    if (command === "compare") {
+      if (!rest) throw new Error("Usage: /analyze-dialog compare previous|<session.jsonl>");
+      return { kind: "compare", target: rest };
+    }
+
+    throw new Error("Usage: /analyze-dialog | compact | compare previous|<session.jsonl>");
+  }
+
+  function dialogAnalyzerScriptPath(): string {
+    return fileURLToPath(new URL("../bench/analyze-dialog.mjs", import.meta.url));
+  }
+
+  function branchHasMessage(branch: readonly SessionEntry[]): boolean {
+    return branch.some((entry) => entry.type === "message");
+  }
+
+  function fullPinnedContext(facts: readonly PinnedFact[]): string {
+    if (facts.length === 0) return "";
+    const body = sortByContextPriority(facts).map(formatFactXML).join("\n");
+    return CONTEXT_HEADER + "\n" + body + "\n\n" + CONTEXT_FOOTER;
+  }
+
+  async function findPreviousSession(ctx: ExtensionContext): Promise<{ path: string; manager: SessionManager } | undefined> {
+    const sessionDir = ctx.sessionManager.getSessionDir();
+    const current = ctx.sessionManager.getSessionFile();
+    const names = await readdir(sessionDir);
+    const candidates: Array<{ path: string; mtimeMs: number }> = [];
+
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue;
+      const filePath = join(sessionDir, name);
+      if (current && resolvePathname(filePath) === resolvePathname(current)) continue;
+      try {
+        const info = await stat(filePath);
+        candidates.push({ path: filePath, mtimeMs: info.mtimeMs });
+      } catch {
+        // Ignore files that disappear during discovery.
+      }
+    }
+
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const candidate of candidates) {
+      try {
+        const manager = SessionManager.open(candidate.path, sessionDir);
+        if (manager.getCwd() !== ctx.cwd) continue;
+        if (!branchHasMessage(manager.getBranch())) continue;
+        return { path: candidate.path, manager };
+      } catch {
+        // Ignore malformed/unreadable historical sessions.
+      }
+    }
+
+    return undefined;
+  }
+
+  async function resolveComparisonSession(
+    target: string,
+    ctx: ExtensionContext,
+  ): Promise<{ path: string; manager: SessionManager }> {
+    if (target.toLowerCase() === "previous") {
+      const previous = await findPreviousSession(ctx);
+      if (!previous) throw new Error("No previous Pi session was found for this project.");
+      return previous;
+    }
+
+    const sessionDir = ctx.sessionManager.getSessionDir();
+    const directPath = target.endsWith(".jsonl")
+      ? resolvePathname(ctx.cwd, target)
+      : join(sessionDir, target);
+
+    try {
+      const manager = SessionManager.open(directPath, sessionDir);
+      if (manager.getCwd() !== ctx.cwd) {
+        throw new Error("The selected session belongs to a different working directory.");
+      }
+      if (!branchHasMessage(manager.getBranch())) throw new Error("The selected session has no dialogue messages.");
+      return { path: directPath, manager };
+    } catch (error) {
+      const names = await readdir(sessionDir);
+      const match = names.find((name) => name.endsWith(".jsonl") && name.includes(target));
+      if (!match) throw error;
+      const matchPath = join(sessionDir, match);
+      const manager = SessionManager.open(matchPath, sessionDir);
+      if (manager.getCwd() !== ctx.cwd) {
+        throw new Error("The selected session belongs to a different working directory.");
+      }
+      if (!branchHasMessage(manager.getBranch())) throw new Error("The selected session has no dialogue messages.");
+      return { path: matchPath, manager };
+    }
+  }
+
+  async function invokeDialogAnalyzer(
+    ctx: ExtensionContext,
+    request: AnalyzeDialogRequest,
+    compared?: { path: string; manager: SessionManager },
+  ): Promise<Record<string, unknown>> {
+    const tempDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-dialog-"));
+
+    try {
+      const currentBranch = ctx.sessionManager.getBranch();
+      if (!branchHasMessage(currentBranch)) throw new Error("Current Pi session has no dialogue messages yet.");
+
+      const primaryFile = join(tempDir, "primary.json");
+      await writeFile(primaryFile, JSON.stringify(currentBranch) + "\n", "utf8");
+
+      const args = [dialogAnalyzerScriptPath(), "--dialog", primaryFile];
+
+      if (request.kind === "compact") {
+        const compact = getContextBlock().text;
+        const baseline = fullPinnedContext(activeFacts());
+        const compactFile = join(tempDir, "compact-context.txt");
+        const baselineFile = join(tempDir, "baseline-context.txt");
+        await writeFile(compactFile, compact, "utf8");
+        await writeFile(baselineFile, baseline, "utf8");
+        args.push("--compact-context", compactFile, "--baseline-context", baselineFile);
+      }
+
+      if (request.kind === "compare") {
+        if (!compared) throw new Error("Comparison session is required.");
+        const comparisonFile = join(tempDir, "comparison.json");
+        await writeFile(comparisonFile, JSON.stringify(compared.manager.getBranch()) + "\n", "utf8");
+        args.push("--compare-dialog", comparisonFile);
+      }
+
+      const evaluatorModel = process.env.PI_BENCH_MODEL?.trim();
+      if (!evaluatorModel) {
+        throw new Error("PI_BENCH_MODEL is not configured. Set the fixed evaluator as provider/model before using /analyze-dialog.");
+      }
+      args.push("--model", evaluatorModel);
+      if (process.env.PI_BENCH_PROVIDER?.trim()) args.push("--provider", process.env.PI_BENCH_PROVIDER.trim());
+      if (process.env.PI_BENCH_THINKING?.trim()) args.push("--thinking", process.env.PI_BENCH_THINKING.trim());
+
+      const result = await execFileAsync(process.execPath, args, {
+        cwd: ctx.cwd,
+        env: { ...process.env },
+        maxBuffer: 12 * 1024 * 1024,
+      });
+
+      const report = JSON.parse(String(result.stdout)) as Record<string, unknown>;
+      if (!report.evaluation || typeof report.evaluation !== "object") {
+        throw new Error("Dialogue evaluator returned an invalid report.");
+      }
+      return report;
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  async function persistDialogReport(
+    ctx: ExtensionContext,
+    report: Record<string, unknown>,
+  ): Promise<string> {
+    const dir = join(ctx.sessionManager.getSessionDir(), "dialog-analysis");
+    await mkdir(dir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filePath = join(dir, "analysis-" + timestamp + ".json");
+    await writeFile(filePath, JSON.stringify(report, null, 2) + "\n", "utf8");
+    return filePath;
+  }
+
+  function formatDialogScore(value: unknown): string {
+    return typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "n/a";
+  }
+
+  function formatDialogDelta(value: unknown): string {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+    return (value >= 0 ? "+" : "") + value.toFixed(1);
+  }
+
+  function notifyDialogReport(
+    ctx: ExtensionContext,
+    request: AnalyzeDialogRequest,
+    report: Record<string, unknown>,
+    filePath: string,
+    comparedPath?: string,
+  ): void {
+    const evaluation = isRecord(report.evaluation) ? report.evaluation : undefined;
+    const meanScore = evaluation?.meanScore;
+    const lines = ["dialogue analysis: " + formatDialogScore(meanScore) + "/100"];
+
+    if (request.kind === "compact" && isRecord(report.contextComparison)) {
+      const reduction = report.contextComparison.reduction;
+      if (typeof reduction === "number" && Number.isFinite(reduction)) {
+        lines.push("smart-compact context reduction: " + (reduction * 100).toFixed(1) + "%");
+      }
+      if (!enabled) lines.push("warning: smart-compact is disabled; compact context is empty.");
+    }
+
+    if (request.kind === "compare" && isRecord(report.dialogueComparison)) {
+      lines.push("compared with: " + (comparedPath ? basename(comparedPath) : "previous session"));
+      lines.push("mean delta (RIGHT - LEFT): " + formatDialogDelta(report.dialogueComparison.meanDelta));
+    }
+
+    if (typeof evaluation?.summary === "string" && evaluation.summary.trim()) {
+      lines.push(evaluation.summary.trim());
+    }
+    lines.push("report: " + filePath);
+
+    notify(ctx, lines.join("\n"), "info");
+  }
+
+  async function handleAnalyzeDialogCommand(args: string, ctx: ExtensionContext): Promise<void> {
+    try {
+      const request = parseAnalyzeDialogArgs(args);
+      let compared: { path: string; manager: SessionManager } | undefined;
+
+      if (request.kind === "compare") {
+        compared = await resolveComparisonSession(request.target, ctx);
+      }
+
+      const report = await invokeDialogAnalyzer(ctx, request, compared);
+      const integration = isRecord(report.integration) ? report.integration : {};
+      report.integration = {
+        ...integration,
+        mode: request.kind,
+        sessionId: ctx.sessionManager.getSessionId(),
+        sessionFile: ctx.sessionManager.getSessionFile() ?? null,
+        comparedSessionId: compared?.manager.getSessionId() ?? null,
+        comparedSessionFile: compared?.path ?? null,
+      };
+
+      const filePath = await persistDialogReport(ctx, report);
+      if (ctx.hasUI) {
+        notifyDialogReport(ctx, request, report, filePath, compared?.path);
+      } else {
+        console.log(JSON.stringify(report, null, 2));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(ctx, "dialogue analysis failed: " + message, "error");
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Runtime activation
   // ---------------------------------------------------------------------------
@@ -1667,6 +1927,14 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       notify(ctx, "Usage: /smart-compact on | off | status", "warning");
+    },
+  });
+
+  pi.registerCommand("analyze-dialog", {
+    description: "Analyze the current dialogue, smart-compact context, or compare with another Pi session",
+    handler: async (args, ctx) => {
+      if (!ctx.isIdle()) await ctx.waitForIdle();
+      await handleAnalyzeDialogCommand(args, ctx);
     },
   });
 

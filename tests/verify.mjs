@@ -4,12 +4,17 @@ import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.5.0');
+assert.equal(pkg.version, '3.7.0');
 assert.match(source, /let enabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
 assert.match(source, /Usage: \/smart-compact on \| off \| status/);
 assert.match(source, /if \(!enabled\) return \{/);
 assert.deepEqual(pkg.pi.extensions, ['./src/index.ts']);
+assert.match(source, /pi\.registerCommand\("analyze-dialog"/);
+assert.match(source, /Usage: \/analyze-dialog \| compact \| compare previous/);
+assert.match(source, /PI_BENCH_MODEL/);
+assert.match(source, /SessionManager\.open/);
+assert.match(source, /--compare-dialog/);
 
 assert.match(source, /const formattedById = new Map<string, string>\(\)/);
 assert.match(source, /let expandedSerializedChars = 0/);
