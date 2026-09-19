@@ -1,6 +1,6 @@
 {
   "name": "pi-smart-compact",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "description": "Branch-scoped pinned memory extension for Pi with token-efficient context packing and deterministic journal replay.",
   "type": "module",
   "license": "MIT",
@@ -24,7 +24,9 @@
   "scripts": {
     "check": "tsc -p tsconfig.json",
     "test": "node --experimental-strip-types tests/runtime.ts && node tests/verify.mjs",
-    "bench": "node --experimental-strip-types bench/run.mjs"
+    "bench": "node --experimental-strip-types bench/run.mjs",
+    "bench:dialog": "node bench/analyze-dialog.mjs",
+    "bench:dialog:test": "node bench/analyze-dialog.mjs --self-test"
   },
   "devDependencies": {
     "@types/node": "22.19.19",
