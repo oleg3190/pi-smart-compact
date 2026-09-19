@@ -2,9 +2,10 @@
 
 Branch-scoped pinned memory for Pi with deterministic journal replay, hard context budgets, injection-resistant fact framing, and token-efficient context packing.
 
-## 3.5.0
+## 3.6.0
 
 - Added per-session runtime activation: `/smart-compact on|off|status`.
+- Added fixed-model dialogue quality analysis via `npm run bench:dialog`.
 - Added `PI_SMART_COMPACT=on` for agent/process-level startup activation.
 - Global installation no longer implies active smart-compact behavior.
 
@@ -56,4 +57,10 @@ The benchmark compares the production context handler with an unbounded full-fac
 
 CI requires at least 15% weighted token reduction on the pressure scenarios while keeping required-fact recall at 100%, stale leakage at 0%, and replay/context-budget checks green.
 
-The benchmark intentionally does not call an external LLM in CI. Model-level task success should be measured separately with the same scenarios once a fixed model/evaluation endpoint is available.
+The deterministic benchmark intentionally does not call an external LLM in CI. For real dialogue quality analysis use the fixed-model evaluator:
+
+```bash
+npm run bench:dialog -- --dialog ./dialog.jsonl --model anthropic/claude-sonnet-4-5
+```
+
+Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` can pin the evaluator configuration for reproducible runs.
