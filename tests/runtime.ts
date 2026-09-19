@@ -113,6 +113,31 @@ async function list(h, params = {}) {
   return tool(h, "checkpoint_list").execute("test", params, undefined, undefined, h.ctx);
 }
 
+const disabled = makeHarness();
+await start(disabled, false);
+assert.equal(disabled.handlers.get("context")({ messages: [] }, disabled.ctx), undefined);
+const disabledAdd = await checkpoint(disabled, {
+  type: "finding",
+  fact: "Disabled mode must not mutate state.",
+});
+assert.match(disabledAdd.content[0].text, /smart-compact is disabled for this session/);
+assert.equal(disabled.branch.length, 0);
+
+const toggled = makeHarness();
+await start(toggled);
+const toggledAdd = await checkpoint(toggled, {
+  type: "finding",
+  fact: "Toggle state must survive disable/enable through durable replay.",
+});
+assert.ok(toggledAdd.details.id);
+await toggled.commands.get("smart-compact")?.handler("off", toggled.ctx);
+assert.equal(toggled.handlers.get("context")({ messages: [] }, toggled.ctx), undefined);
+const offList = await list(toggled);
+assert.match(offList.content[0].text, /smart-compact is disabled for this session/);
+await toggled.commands.get("smart-compact")?.handler("on", toggled.ctx);
+const onList = await list(toggled, { includeText: true });
+assert.match(onList.content[0].text, /Toggle state must survive disable\/enable through durable replay\./);
+
 const first = makeHarness();
 await start(first);
 
