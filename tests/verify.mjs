@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.5.0');
+assert.equal(pkg.version, '3.6.0');
 assert.match(source, /let enabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
 assert.match(source, /Usage: \/smart-compact on \| off \| status/);
