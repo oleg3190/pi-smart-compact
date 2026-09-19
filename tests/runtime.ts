@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import smartCompact from "../src/index.ts";
 
-function makeHarness(initialEntries = [], appendMode = "normal") {
+function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
   const branch = [...initialEntries];
+  const notifications = [];
+  const statuses = [];
 
   const pi = {
     on(name, handler) {
@@ -31,19 +33,23 @@ function makeHarness(initialEntries = [], appendMode = "normal") {
   smartCompact(pi);
 
   const ctx = {
-    hasUI: false,
+    hasUI,
     sessionManager: {
       getBranch: () => branch,
       getSessionFile: () => "runtime-test",
     },
     ui: {
-      setStatus() {},
-      notify() {},
+      setStatus(_id, text) {
+        statuses.push(text);
+      },
+      notify(text, type) {
+        notifications.push({ text, type });
+      },
       confirm: async () => true,
     },
   };
 
-  return { handlers, tools, commands, branch, ctx };
+  return { handlers, tools, commands, branch, ctx, notifications, statuses };
 }
 
 async function start(h, enabled = true) {
@@ -112,6 +118,34 @@ async function forget(h, params) {
 async function list(h, params = {}) {
   return tool(h, "checkpoint_list").execute("test", params, undefined, undefined, h.ctx);
 }
+
+const runtime = makeHarness([], "normal", true);
+await start(runtime);
+await runtime.commands.get("smart-compact")?.handler("status --json", runtime.ctx);
+let runtimeStatus = JSON.parse(runtime.notifications.at(-1).text);
+assert.equal(runtimeStatus.enabled, true);
+assert.equal(runtimeStatus.runtimeActive, true);
+assert.equal(runtimeStatus.activationSource, "env");
+assert.equal(runtimeStatus.contextApplied, false);
+assert.equal(runtimeStatus.contextApplications, 0);
+
+const runtimeContext = runtime.handlers.get("context")({ messages: [] }, runtime.ctx);
+assert.ok(runtimeContext?.messages?.[0]?.content);
+await runtime.handlers.get("session_before_compact")?.({ customInstructions: "", willRetry: false }, runtime.ctx);
+await runtime.commands.get("smart-compact")?.handler("status --json", runtime.ctx);
+runtimeStatus = JSON.parse(runtime.notifications.at(-1).text);
+assert.equal(runtimeStatus.contextApplied, true);
+assert.equal(runtimeStatus.contextApplications, 1);
+assert.equal(runtimeStatus.compactionGuidanceApplied, true);
+assert.equal(runtimeStatus.compactionGuidanceApplications, 1);
+assert.equal(runtimeStatus.contextCost.totalChars, runtimeContext.messages[0].content.length);
+
+await runtime.commands.get("smart-compact")?.handler("off", runtime.ctx);
+await runtime.commands.get("smart-compact")?.handler("status --json", runtime.ctx);
+runtimeStatus = JSON.parse(runtime.notifications.at(-1).text);
+assert.equal(runtimeStatus.enabled, false);
+assert.equal(runtimeStatus.runtimeActive, false);
+assert.equal(runtimeStatus.contextApplied, true);
 
 const disabled = makeHarness();
 await start(disabled, false);
