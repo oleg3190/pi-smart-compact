@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.0 — 2026-09-19
+- Added `/analyze-dialog` for direct in-Pi dialogue analysis with the fixed evaluator configured by `PI_BENCH_MODEL`.
+- Added `/analyze-dialog compact` with smart-compact context versus full active pinned-fact baseline comparison.
+- Added `/analyze-dialog compare previous|<session.jsonl>` for active-branch comparison across Pi sessions.
+- Added per-metric deltas, mean delta, and persisted JSON analysis reports.
+- Added static CI verification for the new command and cross-session comparison wiring.
+
+
 ## 3.6.0 — 2026-09-19
 - Added a fixed-model dialogue evaluator via `npm run bench:dialog`.
 - Supports Pi JSON/JSONL sessions, generic role/content JSONL, and plain-text transcripts.
