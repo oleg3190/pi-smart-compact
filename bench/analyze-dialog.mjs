@@ -683,6 +683,45 @@ async function selfTest() {
   const parsed = parseJsonObject('```json\n{"ok":true}\n```');
   assert.equal(parsed.ok, true);
 
+  const comparison = normalizeComparisonEvaluation({
+    left: {
+      scores: Object.fromEntries(METRIC_NAMES.map((name) => [name, 70])),
+      confidence: 0.9,
+      summary: "Left synthetic result.",
+      strengths: ["Left strength."],
+      issues: ["Left issue."],
+      evidence: ["Left evidence."],
+    },
+    right: {
+      scores: Object.fromEntries(METRIC_NAMES.map((name) => [name, 80])),
+      confidence: 0.91,
+      summary: "Right synthetic result.",
+      strengths: ["Right strength."],
+      issues: ["Right issue."],
+      evidence: ["Right evidence."],
+    },
+    comparison: {
+      summary: "Synthetic comparison.",
+      strengths: ["Right preserved more task context."],
+      issues: ["Right had one unsupported claim."],
+      evidence: ["Synthetic fixture only."],
+    },
+  });
+  assert.equal(comparison.left.meanScore, 70);
+  assert.equal(comparison.right.meanScore, 80);
+  assert.equal(comparison.meanDelta, 10);
+  assert.equal(comparison.deltas.taskCompletion, 10);
+  assert.equal(comparison.summary, "Synthetic comparison.");
+
+  const comparePrompt = buildEvaluationPrompt(
+    rendered,
+    null,
+    null,
+    { text: "### 1. USER\nA previous session.", truncated: false },
+  );
+  assert.match(comparePrompt, /<left-dialogue>/);
+  assert.match(comparePrompt, /<right-dialogue>/);
+  assert.match(comparePrompt, /Score LEFT and RIGHT independently/);
   console.log("dialog-analysis: OK");
 }
 
