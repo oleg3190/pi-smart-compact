@@ -1504,6 +1504,25 @@ async function selfTest() {
   assert.ok(recommendations.some((item) => item.code === "priority-recall"));
   assert.ok(recommendations.some((item) => item.code === "prune-low-priority"));
 
+  const replayTask = findFinalUserTask(collected);
+  assert.equal(replayTask.text, "What is the deployment target?");
+  assert.equal(replayTask.messageIndex, 2);
+
+  const replayPrompt = buildReplayPrompt(replayTask.text, "deployment=staging");
+  assert.match(replayPrompt, /<user-task>/);
+  assert.match(replayPrompt, /deployment=staging/);
+  assert.match(replayPrompt, /quoted durable project data/);
+
+  const replayEvalPrompt = buildReplayEvaluatorPrompt(
+    replayTask.text,
+    { text: "baseline", truncated: false },
+    { text: "compact", truncated: false },
+    "baseline answer",
+    "compact answer",
+  );
+  assert.match(replayEvalPrompt, /LEFT = BASELINE/);
+  assert.match(replayEvalPrompt, /RIGHT = COMPACT/);
+  assert.match(replayEvalPrompt, /same user task/);
   const runtimeStatus = normalizeRuntimeStatus({
     schemaVersion: "1.0.0",
     enabled: true,
@@ -1578,6 +1597,61 @@ async function main() {
 
   const compressionAudit = buildCompressionAudit(compactContext, baselineContext);
   const recommendations = buildRecommendations(compressionAudit, normalizeRuntimeStatus(runtimeStatus));
+
+  if (args.counterfactualReplay) {
+    if (!baselineContext || !compactContext) {
+      throw new Error("Counterfactual replay requires --baseline-context and --compact-context.");
+    }
+
+    const task = findFinalUserTask(dialogue.messages);
+    const baselineArm = await runReplayArm(args, task, baselineContext, "baseline");
+    const compactArm = await runReplayArm(args, task, compactContext, "compact");
+    const arbiter = await runReplayArbiter(
+      args,
+      task,
+      baselineContext,
+      compactContext,
+      baselineArm.responseText,
+      compactArm.responseText,
+    );
+
+    const report = {
+      reportVersion: "1.3.0",
+      generatedAt: new Date().toISOString(),
+      ...buildReportInputs(
+        dialogue,
+        renderedDialogue,
+        compactContext,
+        baselineContext,
+        runtimeStatus,
+        compressionAudit,
+        recommendations,
+        comparisonDialogue,
+        renderedComparisonDialogue,
+      ),
+      evaluation: null,
+      dialogueComparison: null,
+      counterfactualReplay: buildCounterfactualReplayReport(
+        task,
+        baselineContext,
+        compactContext,
+        normalizeRuntimeStatus(runtimeStatus),
+        compressionAudit,
+        baselineArm,
+        compactArm,
+        arbiter,
+      ),
+    };
+
+    const json = JSON.stringify(report, null, 2);
+    if (args.out) {
+      await fs.mkdir(path.dirname(path.resolve(args.out)), { recursive: true });
+      await fs.writeFile(args.out, json + "\n", "utf8");
+    }
+    console.log(json);
+    return;
+  }
+
   const prompt = buildEvaluationPrompt(
     renderedDialogue,
     compactContext,
