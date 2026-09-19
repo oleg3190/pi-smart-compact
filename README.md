@@ -1,5 +1,13 @@
 # pi-smart-compact
 
+## 3.9.0
+
+- Added `/analyze-dialog counterfactual` (also `/analyze-dialog compact replay`) for paired baseline-vs-compact replay of the same final user task.
+- Both arms use the same target model, thinking level, tool configuration, and task; only the context variant changes.
+- Reports include actual reported input/output/total usage, latency, both generated answers, semantic quality deltas, and the evaluator's grounded comparison.
+- The replay intentionally excludes the historical dialogue so the compact context is tested as a replacement for durable context, not as an extra hint layered on top of the original conversation.
+- A single replay pair is an experimental estimate because model sampling may be nondeterministic.
+
 ## 3.8.0
 
 - /analyze-dialog compact now emits a deterministic compression audit alongside the LLM evaluation.
