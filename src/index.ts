@@ -1898,6 +1898,13 @@ export default function (pi: ExtensionAPI) {
       if (typeof quality?.summary === "string" && quality.summary.trim()) {
         lines.push(quality.summary.trim());
       }
+      const replayRecommendations = Array.isArray(replay.recommendations)
+        ? replay.recommendations.filter((item) => isRecord(item))
+        : [];
+      if (replayRecommendations.length > 0) {
+        const top = replayRecommendations[0];
+        if (typeof top.message === "string") lines.push("recommendation: " + top.message);
+      }
       lines.push("paired replay: same task · same target model · context is the intended variable");
     }
 
