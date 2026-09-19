@@ -129,6 +129,11 @@ assert.equal(runtimeStatus.activationSource, "command");
 assert.equal(runtimeStatus.contextApplied, false);
 assert.equal(runtimeStatus.contextApplications, 0);
 
+await checkpoint(runtime, {
+  type: "finding",
+  fact: "Runtime telemetry test fact must be present in applied context.",
+});
+
 const runtimeContext = runtime.handlers.get("context")({ messages: [] }, runtime.ctx);
 assert.ok(runtimeContext?.messages?.[0]?.content);
 await runtime.handlers.get("session_before_compact")?.({ customInstructions: "", willRetry: false }, runtime.ctx);
