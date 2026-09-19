@@ -1243,7 +1243,47 @@ async function runReplayArbiter(options, task, baselineContext, compactContext, 
   }
 }
 
+
+function buildReplayRecommendations(comparison, baselineUsage, compactUsage) {
+  const out = [];
+  const push = (code, severity, message, action, evidence = []) => out.push({ code, severity, message, action, evidence });
+  const meanDelta = comparison.meanDelta;
+  const taskDelta = comparison.deltas.taskCompletion;
+  const inputTokensSaved = baselineUsage.reported && compactUsage.reported
+    ? baselineUsage.inputTokens - compactUsage.inputTokens
+    : null;
+
+  if (meanDelta <= -5 || taskDelta <= -5) {
+    push(
+      "quality-regression",
+      "warning",
+      "Compact replay scored lower than baseline on the semantic evaluator.",
+      "Inspect omitted/priority-reduced facts and rerun the replay after protecting the task-critical context.",
+      ["meanDelta=" + meanDelta.toFixed(2), "taskCompletionDelta=" + taskDelta.toFixed(2)],
+    );
+  } else if (meanDelta >= 5 && inputTokensSaved !== null && inputTokensSaved > 0) {
+    push(
+      "quality-preserved-with-savings",
+      "info",
+      "Compact replay scored higher while using fewer reported input tokens.",
+      "Keep the current compression policy and monitor the same A/B metrics across later sessions.",
+      ["meanDelta=" + meanDelta.toFixed(2), "inputTokensSaved=" + inputTokensSaved],
+    );
+  } else if (Math.abs(meanDelta) < 5) {
+    push(
+      "quality-neutral",
+      "info",
+      "No material mean semantic quality delta was observed in this single replay pair.",
+      "Repeat the paired replay across representative tasks before changing the compression policy.",
+      ["meanDelta=" + meanDelta.toFixed(2)],
+    );
+  }
+
+  return out;
+}
+
 function buildCounterfactualReplayReport(task, baselineContext, compactContext, runtimeStatus, audit, baselineArm, compactArm, arbiter) {
+  const replayRecommendations = buildReplayRecommendations(arbiter.comparison, baselineArm.usage, compactArm.usage);
   const baselineUsage = baselineArm.usage;
   const compactUsage = compactArm.usage;
   const usageReported = baselineUsage.reported && compactUsage.reported;
@@ -1285,6 +1325,7 @@ function buildCounterfactualReplayReport(task, baselineContext, compactContext, 
       issues: arbiter.comparison.issues,
       evidence: arbiter.comparison.evidence,
     },
+    recommendations: replayRecommendations,
     runtime: runtimeStatus,
     compressionAudit: audit,
   };
@@ -1513,6 +1554,15 @@ async function selfTest() {
   assert.match(replayPrompt, /deployment=staging/);
   assert.match(replayPrompt, /quoted durable project data/);
 
+  const replayRecommendations = buildReplayRecommendations(
+    {
+      meanDelta: -7,
+      deltas: Object.fromEntries(METRIC_NAMES.map((name) => [name, name === "taskCompletion" ? -8 : -2])),
+    },
+    { reported: true, inputTokens: 1000 },
+    { reported: true, inputTokens: 800 },
+  );
+  assert.equal(replayRecommendations[0].code, "quality-regression");
   const replayEvalPrompt = buildReplayEvaluatorPrompt(
     replayTask.text,
     { text: "baseline", truncated: false },
