@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { performance } from "node:perf_hooks";
 
-const DIALOG_EVAL_PROMPT_VERSION = "1.0.0";
+const DIALOG_EVAL_PROMPT_VERSION = "1.1.0";
 const DEFAULT_MAX_DIALOG_CHARS = 120_000;
 const DEFAULT_MAX_CONTEXT_CHARS = 20_000;
 
