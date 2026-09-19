@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
 const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+const benchSource = fs.readFileSync(new URL('../bench/analyze-dialog.mjs', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 assert.equal(pkg.version, '3.9.0');
@@ -19,9 +20,9 @@ assert.match(source, /priorityWeightedRecall/);
 assert.match(source, /estimatedTokensSaved/);
 assert.match(source, /recommendations/);
 assert.match(source, /counterfactual/);
-assert.match(source, /COUNTERFACTUAL_REPLAY_VERSION/);
-assert.match(source, /REPLAY_SYSTEM_PROMPT/);
-assert.match(source, /PI_REPLAY_MODEL/);
+assert.match(benchSource, /COUNTERFACTUAL_REPLAY_VERSION/);
+assert.match(benchSource, /REPLAY_SYSTEM_PROMPT/);
+assert.match(benchSource, /PI_REPLAY_MODEL/);
 assert.match(source, /if \(!enabled\) return \{/);
 assert.deepEqual(pkg.pi.extensions, ['./src/index.ts']);
 assert.match(source, /pi\.registerCommand\("analyze-dialog"/);
