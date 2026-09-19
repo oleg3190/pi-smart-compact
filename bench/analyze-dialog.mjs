@@ -615,15 +615,15 @@ function getUsage(session) {
   };
 }
 
-async function runEvaluation(options) {
+
+async function createModelSession(selection, thinkingLevel, systemPrompt) {
   const { createAgentSession, ModelRuntime, SessionManager, SettingsManager, createExtensionRuntime } =
     await import("@earendil-works/pi-coding-agent");
   const { getModel } = await import("@earendil-works/pi-ai/compat");
 
-  const selection = parseModelSelection(options);
   const model = getModel(selection.provider, selection.modelId);
   if (!model) {
-    throw new Error(`Model not found in pi-ai registry: ${selection.provider}/${selection.modelId}`);
+    throw new Error("Model not found in pi-ai registry: " + selection.provider + "/" + selection.modelId);
   }
 
   const modelRuntime = await ModelRuntime.create();
@@ -633,7 +633,7 @@ async function runEvaluation(options) {
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => SYSTEM_PROMPT,
+    getSystemPrompt: () => systemPrompt,
     getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
     getAppendSystemPromptSources: () => [],
@@ -645,12 +645,19 @@ async function runEvaluation(options) {
     cwd: process.cwd(),
     model,
     modelRuntime,
-    thinkingLevel: options.thinking,
+    thinkingLevel,
     tools: [],
     sessionManager: SessionManager.inMemory(),
     settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
     resourceLoader,
   });
+
+  return { session, model };
+}
+
+async function runEvaluation(options) {
+  const selection = parseModelSelection(options);
+  const { session } = await createModelSession(selection, options.thinking, SYSTEM_PROMPT);
 
   const startedAt = performance.now();
   try {
