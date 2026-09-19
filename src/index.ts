@@ -1999,7 +1999,7 @@ export default function (pi: ExtensionAPI) {
     description: "Enable, disable, or inspect smart-compact for the current Pi session",
     handler: async (args, ctx) => {
       const command = args.trim().toLowerCase();
-      if (command === "") {
+      if (command === "" || command === "on" || command === "enable") {
         setEnabled(true, ctx);
         notify(ctx, "smart-compact enabled for this session.", "info");
         return;
