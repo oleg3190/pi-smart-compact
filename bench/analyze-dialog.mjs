@@ -171,6 +171,24 @@ function collectMessages(value, out = []) {
     return out;
   }
 
+  if (value.type === "compaction" && typeof value.summary === "string" && value.summary.trim()) {
+    out.push({
+      id: typeof value.id === "string" ? value.id : undefined,
+      role: "system",
+      content: "[Pi compaction summary]\n" + value.summary.trim(),
+    });
+    return out;
+  }
+
+  if (value.type === "branch_summary" && typeof value.summary === "string" && value.summary.trim()) {
+    out.push({
+      id: typeof value.id === "string" ? value.id : undefined,
+      role: "system",
+      content: "[Pi branch summary]\n" + value.summary.trim(),
+    });
+    return out;
+  }
+
   if (Array.isArray(value.messages)) {
     collectMessages(value.messages, out);
     return out;
@@ -668,6 +686,23 @@ async function selfTest() {
   assert.equal(sessionMessages.length, 2);
   assert.equal(sessionMessages[0].id, "entry-1");
   assert.equal(sessionMessages[1].id, "entry-2");
+  const summarized = dedupeMessages(collectMessages([
+    {
+      type: "compaction",
+      id: "compact-1",
+      summary: "Earlier task state is preserved here.",
+    },
+    {
+      type: "branch_summary",
+      id: "branch-1",
+      summary: "A previous branch was summarized here.",
+    },
+  ]));
+  assert.equal(summarized.length, 2);
+  assert.equal(summarized[0].role, "system");
+  assert.match(summarized[0].content, /Earlier task state/);
+  assert.match(summarized[1].content, /previous branch/);
+
   assert.equal(collected[0].role, "user");
   assert.equal(collected[3].content, "The deployment target is staging.");
 
