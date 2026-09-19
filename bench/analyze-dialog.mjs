@@ -490,11 +490,11 @@ function parseModelSelection(options) {
   return { provider, modelId };
 }
 
-function buildReportInputs(dialogue, compactContext, baselineContext) {
+function buildReportInputs(sourceDialogue, dialogue, compactContext, baselineContext) {
   return {
     dialogue: {
-      messages: dialogue.messages.length,
-      sourceChars: dialogue.sourceChars,
+      messages: sourceDialogue.messages.length,
+      sourceChars: sourceDialogue.sourceChars,
       analyzedChars: dialogue.text.length,
       truncated: dialogue.truncated,
     },
@@ -607,7 +607,7 @@ async function main() {
   const report = {
     reportVersion: "1.0.0",
     generatedAt: startedAt,
-    ...buildReportInputs(renderedDialogue, compactContext, baselineContext),
+    ...buildReportInputs(dialogue, renderedDialogue, compactContext, baselineContext),
     ...result,
   };
 
