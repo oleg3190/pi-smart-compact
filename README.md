@@ -1,5 +1,10 @@
 # pi-smart-compact
 
+## 3.7.1
+
+- Added structured runtime telemetry for `/smart-compact status` and `/smart-compact status --json`: activation source, actual context application count, compaction-guidance applications, and current context cost.
+- `/analyze-dialog compact` now records runtime evidence so reports distinguish enabled runtime from context actually applied.
+
 ## 3.7.0
 
 - Added `/analyze-dialog` for fixed-model dialogue quality analysis directly from Pi.
