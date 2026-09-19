@@ -125,7 +125,7 @@ await runtime.commands.get("smart-compact")?.handler("status --json", runtime.ct
 let runtimeStatus = JSON.parse(runtime.notifications.at(-1).text);
 assert.equal(runtimeStatus.enabled, true);
 assert.equal(runtimeStatus.runtimeActive, true);
-assert.equal(runtimeStatus.activationSource, "env");
+assert.equal(runtimeStatus.activationSource, "command");
 assert.equal(runtimeStatus.contextApplied, false);
 assert.equal(runtimeStatus.contextApplications, 0);
 
