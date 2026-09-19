@@ -1116,6 +1116,180 @@ function buildRecommendations(audit, runtimeStatus) {
 }
 
 
+
+function parseReplayModelSelection(options) {
+  const requestedModel = String(
+    options.replayModel ?? process.env.PI_REPLAY_MODEL ?? options.model ?? process.env.PI_BENCH_MODEL ?? "",
+  ).trim();
+  let provider = String(options.replayProvider ?? process.env.PI_REPLAY_PROVIDER ?? "").trim();
+  let modelId = requestedModel;
+  if (!provider && requestedModel.includes("/")) {
+    const slash = requestedModel.indexOf("/");
+    provider = requestedModel.slice(0, slash);
+    modelId = requestedModel.slice(slash + 1);
+  }
+  if (!provider || !modelId) {
+    throw new Error("Counterfactual replay model is required: pass --replay-model provider/model or set PI_REPLAY_MODEL/PI_BENCH_MODEL");
+  }
+  return { provider, modelId };
+}
+
+async function runReplayArm(options, task, context, arm) {
+  const selection = parseReplayModelSelection(options);
+  const thinking = String(
+    options.replayThinking ?? process.env.PI_REPLAY_THINKING ?? options.thinking ?? process.env.PI_BENCH_THINKING ?? "off",
+  );
+  const { session } = await createModelSession(selection, thinking, REPLAY_SYSTEM_PROMPT);
+  const startedAt = performance.now();
+  let responseText = "";
+
+  try {
+    session.subscribe((event) => {
+      if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent?.type === "text_delta" &&
+        typeof event.assistantMessageEvent.delta === "string"
+      ) {
+        responseText += event.assistantMessageEvent.delta;
+      }
+    });
+    await session.prompt(buildReplayPrompt(task.text, context?.text ?? ""));
+    if (!responseText) {
+      const assistant = session.messages.filter((message) => message?.role === "assistant").at(-1);
+      responseText = textFromContent(assistant?.content);
+    }
+    const activeModel = session.model;
+    return {
+      arm,
+      model: {
+        provider: activeModel?.provider ?? selection.provider,
+        id: activeModel?.id ?? selection.modelId,
+        name: activeModel?.name ?? null,
+        requestedProvider: selection.provider,
+        requestedId: selection.modelId,
+        thinkingLevel: session.thinkingLevel,
+      },
+      usage: getUsage(session),
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+      responseText,
+      responseChars: responseText.length,
+      contextChars: context?.text?.length ?? 0,
+    };
+  } finally {
+    session.dispose();
+  }
+}
+
+function buildReplayEvaluatorPrompt(task, baselineContext, compactContext, baselineAnswer, compactAnswer) {
+  return [
+    "Evaluate two answers to the same user task under a counterfactual context A/B replay.",
+    "",
+    "<user-task>", task, "</user-task>", "",
+    "<baseline-context>", baselineContext?.text ?? "(none)", "</baseline-context>", "",
+    "<baseline-answer>", baselineAnswer, "</baseline-answer>", "",
+    "<compact-context>", compactContext?.text ?? "(none)", "</compact-context>", "",
+    "<compact-answer>", compactAnswer, "</compact-answer>", "",
+    "LEFT = BASELINE. RIGHT = COMPACT.",
+    "Score both answers independently using the same rubric, then compare them.",
+    "Do not infer hidden causes. Attribute differences only to observable answer/context evidence.",
+  ].join("\n");
+}
+
+async function runReplayArbiter(options, task, baselineContext, compactContext, baselineAnswer, compactAnswer) {
+  const selection = parseModelSelection(options);
+  const { session } = await createModelSession(selection, options.thinking, REPLAY_EVALUATOR_SYSTEM_PROMPT);
+  const startedAt = performance.now();
+  let responseText = "";
+
+  try {
+    session.subscribe((event) => {
+      if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent?.type === "text_delta" &&
+        typeof event.assistantMessageEvent.delta === "string"
+      ) {
+        responseText += event.assistantMessageEvent.delta;
+      }
+    });
+    await session.prompt(buildReplayEvaluatorPrompt(task.text, baselineContext, compactContext, baselineAnswer, compactAnswer));
+    if (!responseText) {
+      const assistant = session.messages.filter((message) => message?.role === "assistant").at(-1);
+      responseText = textFromContent(assistant?.content);
+    }
+    const parsed = parseJsonObject(responseText);
+    const comparison = normalizeComparisonEvaluation(parsed);
+    const activeModel = session.model;
+    return {
+      analyzer: {
+        name: "pi-smart-compact counterfactual replay evaluator",
+        version: COUNTERFACTUAL_REPLAY_VERSION,
+        timestamp: new Date().toISOString(),
+      },
+      model: {
+        provider: activeModel?.provider ?? selection.provider,
+        id: activeModel?.id ?? selection.modelId,
+        name: activeModel?.name ?? null,
+        requestedProvider: selection.provider,
+        requestedId: selection.modelId,
+        thinkingLevel: session.thinkingLevel,
+        fixed: true,
+      },
+      usage: getUsage(session),
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+      comparison,
+    };
+  } finally {
+    session.dispose();
+  }
+}
+
+function buildCounterfactualReplayReport(task, baselineContext, compactContext, runtimeStatus, audit, baselineArm, compactArm, arbiter) {
+  const baselineUsage = baselineArm.usage;
+  const compactUsage = compactArm.usage;
+  const usageReported = baselineUsage.reported && compactUsage.reported;
+
+  return {
+    version: COUNTERFACTUAL_REPLAY_VERSION,
+    methodology: {
+      sameTask: true,
+      sameModel: baselineArm.model.provider === compactArm.model.provider && baselineArm.model.id === compactArm.model.id,
+      sameThinkingLevel: baselineArm.model.thinkingLevel === compactArm.model.thinkingLevel,
+      sameTools: true,
+      toolsUsed: false,
+      historicalDialogueExcluded: true,
+      onlyIntendedVariable: "context",
+      interpretation: "Paired counterfactual replay estimate. Model sampling can be nondeterministic, so one A/B pair is evidence, not proof of a causal effect.",
+    },
+    task: { text: task.text, messageIndex: task.messageIndex, messageId: task.messageId },
+    baselineContext: { chars: baselineContext.text.length, truncated: baselineContext.truncated, kind: "active-pinned-facts" },
+    compactContext: { chars: compactContext.text.length, truncated: compactContext.truncated },
+    baseline: baselineArm,
+    compact: compactArm,
+    usageComparison: {
+      reported: usageReported,
+      inputTokensSaved: usageReported ? baselineUsage.inputTokens - compactUsage.inputTokens : null,
+      outputTokensDelta: usageReported ? compactUsage.outputTokens - baselineUsage.outputTokens : null,
+      totalTokensDelta: usageReported ? compactUsage.totalTokens - baselineUsage.totalTokens : null,
+      costUsdDelta: usageReported && baselineUsage.costUsd !== null && compactUsage.costUsd !== null
+        ? compactUsage.costUsd - baselineUsage.costUsd
+        : null,
+    },
+    arbiter,
+    quality: {
+      baseline: arbiter.comparison.left,
+      compact: arbiter.comparison.right,
+      deltas: arbiter.comparison.deltas,
+      meanDelta: arbiter.comparison.meanDelta,
+      summary: arbiter.comparison.summary,
+      strengths: arbiter.comparison.strengths,
+      issues: arbiter.comparison.issues,
+      evidence: arbiter.comparison.evidence,
+    },
+    runtime: runtimeStatus,
+    compressionAudit: audit,
+  };
+}
+
 function buildReportInputs(
   sourceDialogue,
   dialogue,
