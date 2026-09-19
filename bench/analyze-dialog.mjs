@@ -358,6 +358,39 @@ function parseJsonObject(text) {
   throw new Error("Evaluator did not return a JSON object");
 }
 
+function normalizeComparisonEvaluation(value) {
+  assert.ok(value && typeof value === "object", "comparison result must be an object");
+
+  const left = normalizeEvaluation(value.left);
+  const right = normalizeEvaluation(value.right);
+  assert.ok(value.comparison && typeof value.comparison === "object", "comparison metadata is required");
+
+  const deltas = {};
+  for (const name of METRIC_NAMES) {
+    deltas[name] = Math.round((right.scores[name] - left.scores[name]) * 100) / 100;
+  }
+
+  const meanDelta = Math.round((right.meanScore - left.meanScore) * 100) / 100;
+  const summary = typeof value.comparison.summary === "string" ? value.comparison.summary.trim() : "";
+  assert.ok(summary.length > 0, "comparison.summary is required");
+
+  const list = (name) => {
+    const candidate = value.comparison[name];
+    return Array.isArray(candidate) ? candidate.filter((item) => typeof item === "string").slice(0, 12) : [];
+  };
+
+  return {
+    left,
+    right,
+    deltas,
+    meanDelta,
+    summary,
+    strengths: list("strengths"),
+    issues: list("issues"),
+    evidence: list("evidence"),
+  };
+}
+
 function normalizeEvaluation(value) {
   assert.ok(value && typeof value === "object", "evaluation must be an object");
   assert.ok(value.scores && typeof value.scores === "object", "evaluation.scores is required");
