@@ -381,12 +381,12 @@ async function main() {
 
   const report = {
     benchmark: "pi-smart-compact packing effectiveness",
-    version: "3.5.0",
+    version: "3.6.0",
     methodology: {
       baseline: "same wrapper + all active facts fully expanded; no compaction",
       smart: "production context handler with hard 10k-character budget",
       tokenEstimate: "same 4 chars/token heuristic used by the extension for ASCII-heavy text",
-      modelTaskSuccess: "not measured in CI; oracle checks cover recall, stale leakage, branch isolation, safety framing, and replay",
+      modelTaskSuccess: "measured separately by bench/analyze-dialog.mjs with a fixed provider/model; CI stays deterministic",
     },
     thresholds: {
       pressureTokenReductionMin: 0.15,
