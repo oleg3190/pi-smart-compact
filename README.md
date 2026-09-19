@@ -1,5 +1,9 @@
 # pi-smart-compact
 
+## 3.7.2
+
+- Bare `/smart-compact` now enables smart-compact for the current Pi session. Use `/smart-compact status` for diagnostics and `/smart-compact off` to disable it.
+
 ## 3.7.1
 
 - Added structured runtime telemetry for `/smart-compact status` and `/smart-compact status --json`: activation source, actual context application count, compaction-guidance applications, and current context cost.
