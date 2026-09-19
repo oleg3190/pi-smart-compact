@@ -642,6 +642,8 @@ function isLegacyStandaloneFact(v: unknown): v is LegacyStandaloneFact {
 // -----------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
+  // Runtime activation is independent from package installation. The package can be globally installed while this session remains inert until enabled.
+  let enabled = /^(1|true|on)$/i.test(process.env.PI_SMART_COMPACT ?? "");
   let pinnedFacts = new Map<string, PinnedFact>();
   let revokedTombstones = new Map<string, Tombstone>();
   let journalWarnings: string[] = [];
@@ -1627,13 +1629,60 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---------------------------------------------------------------------------
+  // Runtime activation
+  // ---------------------------------------------------------------------------
+
+  function setEnabled(next: boolean, ctx: ExtensionContext): void {
+    if (enabled === next) {
+      if (next) updateStatus(ctx);
+      return;
+    }
+    enabled = next;
+    clearState();
+    if (enabled) {
+      restoreFromCurrentBranch(ctx);
+      updateStatus(ctx);
+    } else if (ctx.hasUI) {
+      ctx.ui.setStatus("smart-compact", "disabled");
+    }
+  }
+
+  pi.registerCommand("smart-compact", {
+    description: "Enable, disable, or inspect smart-compact for the current Pi session",
+    handler: async (args, ctx) => {
+      const command = args.trim().toLowerCase();
+      if (command === "on" || command === "enable") {
+        setEnabled(true, ctx);
+        notify(ctx, "smart-compact enabled for this session.", "info");
+        return;
+      }
+      if (command === "off" || command === "disable") {
+        setEnabled(false, ctx);
+        notify(ctx, "smart-compact disabled for this session.", "info");
+        return;
+      }
+      if (command === "status" || command === "") {
+        notify(ctx, `smart-compact: ${enabled ? "enabled" : "disabled"}${process.env.PI_SMART_COMPACT ? ` (PI_SMART_COMPACT=${process.env.PI_SMART_COMPACT})` : ""}`, "info");
+        if (enabled) updateStatus(ctx);
+        return;
+      }
+      notify(ctx, "Usage: /smart-compact on | off | status", "warning");
+    },
+  });
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
-  pi.on("session_start", async (_event, ctx) => restoreFromCurrentBranch(ctx));
-  pi.on("session_tree", async (_event, ctx) => restoreFromCurrentBranch(ctx));
+  pi.on("session_start", async (_event, ctx) => {
+    if (enabled) restoreFromCurrentBranch(ctx);
+  });
+  pi.on("session_tree", async (_event, ctx) => {
+    if (enabled) restoreFromCurrentBranch(ctx);
+  });
 
   pi.on("session_before_tree", (event) => {
+    if (!enabled) return;
     const custom = [
       event.preparation.customInstructions,
       "Pinned facts are branch-scoped durable state and are restored separately after tree navigation.",
@@ -1644,6 +1693,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_before_compact", (event) => {
+    if (!enabled) return;
     const facts = activeFacts();
     const instructions = [
       "Compact the conversation without inventing facts.",
@@ -1655,6 +1705,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("context", (event) => {
+    if (!enabled) return;
     const { text } = getContextBlock();
     if (!text) return;
     return {
@@ -1692,6 +1743,15 @@ export default function (pi: ExtensionAPI) {
       priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
+      if (!enabled) return {
+        content: [{ type: "text", text: "smart-compact is disabled for this session. Use /smart-compact on." }],
+        details: {
+          operation: "add",
+          pinnedFactsCount: pinnedFacts.size,
+          pinnedChars: pinnedChars(),
+          contextCost: getContextBlock().cost,
+        } satisfies CheckpointDetails,
+      };
       const text = validateFactText(params.fact);
       const duplicate = findDuplicateFact(params.type, text);
 
@@ -1770,6 +1830,15 @@ export default function (pi: ExtensionAPI) {
       priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
+      if (!enabled) return {
+        content: [{ type: "text", text: "smart-compact is disabled for this session. Use /smart-compact on." }],
+        details: {
+          operation: "revise",
+          pinnedFactsCount: pinnedFacts.size,
+          pinnedChars: pinnedChars(),
+          contextCost: getContextBlock().cost,
+        } satisfies CheckpointDetails,
+      };
       if (!isValidId(params.id)) {
         return {
           content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }],
@@ -1892,6 +1961,15 @@ export default function (pi: ExtensionAPI) {
       reason: Type.Optional(Type.String({ maxLength: MAX_AUDIT_REASON_CHARS })),
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
+      if (!enabled) return {
+        content: [{ type: "text", text: "smart-compact is disabled for this session. Use /smart-compact on." }],
+        details: {
+          operation: "forget",
+          pinnedFactsCount: pinnedFacts.size,
+          pinnedChars: pinnedChars(),
+          contextCost: getContextBlock().cost,
+        } satisfies CheckpointDetails,
+      };
       if (!isValidId(params.id)) {
         return {
           content: [{ type: "text", text: `Invalid fact id: ${params.id}.` }],
@@ -1947,6 +2025,15 @@ export default function (pi: ExtensionAPI) {
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
     }),
     async execute(_id, params, _sig, _onUpdate, ctx) {
+      if (!enabled) return {
+        content: [{ type: "text", text: "smart-compact is disabled for this session. Use /smart-compact on." }],
+        details: {
+          operation: "list",
+          pinnedFactsCount: pinnedFacts.size,
+          pinnedChars: pinnedChars(),
+          contextCost: getContextBlock().cost,
+        } satisfies CheckpointDetails,
+      };
       const isTargeted = Boolean(params.id);
       const offset = isTargeted ? 0 : (params.offset ?? 0);
       const limit = isTargeted ? 1 : (params.limit ?? CHECKPOINT_UI_PAGE_SIZE);
@@ -1975,6 +2062,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("checkpoints", {
     description: t("cmdCheckpoints"),
     handler: async (args, ctx) => {
+      if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
       const full = tokens.includes("--full");
       const parsedPage = Number(tokens.find(tok => /^\d+$/.test(tok)) ?? "1");
@@ -2002,6 +2090,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("checkpoint-forget", {
     description: t("cmdForget"),
     handler: async (args, ctx) => {
+      if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       const id = args.trim();
       if (!id || !isValidId(id) || !pinnedFacts.has(id)) {
         notify(ctx, id ? t("factNotFound", { id }) : t("usageForget"), "warning");
@@ -2018,6 +2107,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("checkpoint-compact-journal", {
     description: t("cmdCompact"),
     handler: async (_args, ctx) => {
+      if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       if (pinnedFacts.size === 0 && revokedTombstones.size === 0) {
         notify(ctx, t("journalEmpty"), "info");
         return;
