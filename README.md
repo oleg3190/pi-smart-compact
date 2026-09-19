@@ -2,6 +2,12 @@
 
 Branch-scoped pinned memory for Pi with deterministic journal replay, hard context budgets, injection-resistant fact framing, and token-efficient context packing.
 
+## 3.5.0
+
+- Added per-session runtime activation: `/smart-compact on|off|status`.
+- Added `PI_SMART_COMPACT=on` for agent/process-level startup activation.
+- Global installation no longer implies active smart-compact behavior.
+
 ## 3.4.2
 
 - Hardened replay validation against malformed oversized audit reasons.
@@ -24,6 +30,10 @@ pi install git:github.com/oleg3190/pi-smart-compact
 ```
 
 The package entry point is `./src/index.ts`.
+
+The package is intended to be installed globally. After installation, smart-compact is **disabled by default** unless `PI_SMART_COMPACT=on` (or `1`/`true`) is set. In an interactive session use `/smart-compact on`, `/smart-compact off`, or `/smart-compact status`.
+
+For a dedicated agent/sub-agent, launch Pi with `PI_SMART_COMPACT=on`. For a clean agent, omit the variable and leave the extension installed but inactive.
 
 Pinned facts are branch-scoped and persisted in Pi's session journal. Fact text is framed as untrusted quoted data in LLM-facing context.
 
