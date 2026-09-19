@@ -3,11 +3,19 @@ import type {
   ExtensionContext,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { execFile } from "node:child_process";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
+const execFileAsync = promisify(execFile);
+
 /**
- * smart-compact v3.6.0 production
+ * smart-compact v3.7.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
