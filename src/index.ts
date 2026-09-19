@@ -74,6 +74,7 @@ const CHECKPOINT_UI_PAGE_SIZE = 10;
 const MAX_TOOL_LIST_CHARS = 8_000;
 const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 const AUTO_SNAPSHOT_MUTATIONS = 100;
+const RUNTIME_STATUS_VERSION = "1.0.0";
 
 const DEFAULT_FACT_PRIORITY = 50;
 const HOT_FACT_PRIORITY = 80;
@@ -652,7 +653,16 @@ function isLegacyStandaloneFact(v: unknown): v is LegacyStandaloneFact {
 
 export default function (pi: ExtensionAPI) {
   // Runtime activation is independent from package installation. The package can be globally installed while this session remains inert until enabled.
-  let enabled = /^(1|true|on)$/i.test(process.env.PI_SMART_COMPACT ?? "");
+  const initialRuntimeEnabled = /^(1|true|on)$/i.test(process.env.PI_SMART_COMPACT ?? "");
+  let enabled = initialRuntimeEnabled;
+  type RuntimeActivationSource = "env" | "command" | "none";
+  let activationSource: RuntimeActivationSource = initialRuntimeEnabled ? "env" : "none";
+  let enabledAt: string | null = initialRuntimeEnabled ? new Date().toISOString() : null;
+  let contextApplications = 0;
+  let lastContextAppliedAt: string | null = null;
+  let compactionGuidanceApplications = 0;
+  let lastCompactionGuidanceAt: string | null = null;
+
   let pinnedFacts = new Map<string, PinnedFact>();
   let revokedTombstones = new Map<string, Tombstone>();
   let journalWarnings: string[] = [];
@@ -1559,6 +1569,26 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
   }
 
+  function getRuntimeStatus(): Record<string, unknown> {
+    const { cost } = getContextBlock();
+    return {
+      schemaVersion: RUNTIME_STATUS_VERSION,
+      enabled,
+      runtimeActive: enabled,
+      activationSource,
+      enabledAt,
+      contextApplied: contextApplications > 0,
+      contextApplications,
+      lastContextAppliedAt,
+      compactionGuidanceApplied: compactionGuidanceApplications > 0,
+      compactionGuidanceApplications,
+      lastCompactionGuidanceAt,
+      pinnedFactsCount: pinnedFacts.size,
+      pinnedChars: pinnedChars(),
+      contextCost: cost,
+    };
+  }
+
   function updateStatus(ctx: ExtensionContext): void {
     if (!ctx.hasUI) return;
     const { cost } = getContextBlock();
@@ -1765,11 +1795,14 @@ export default function (pi: ExtensionAPI) {
       if (request.kind === "compact") {
         const compact = getContextBlock().text;
         const baseline = fullPinnedContext(activeFacts());
+        const runtimeStatus = getRuntimeStatus();
         const compactFile = join(tempDir, "compact-context.txt");
         const baselineFile = join(tempDir, "baseline-context.txt");
+        const runtimeStatusFile = join(tempDir, "runtime-status.json");
         await writeFile(compactFile, compact, "utf8");
         await writeFile(baselineFile, baseline, "utf8");
-        args.push("--compact-context", compactFile, "--baseline-context", baselineFile);
+        await writeFile(runtimeStatusFile, JSON.stringify(runtimeStatus, null, 2) + "\n", "utf8");
+        args.push("--compact-context", compactFile, "--baseline-context", baselineFile, "--runtime-status", runtimeStatusFile);
       }
 
       if (request.kind === "compare") {
@@ -1840,7 +1873,12 @@ export default function (pi: ExtensionAPI) {
       if (typeof reduction === "number" && Number.isFinite(reduction)) {
         lines.push("smart-compact context reduction: " + (reduction * 100).toFixed(1) + "%");
       }
-      if (!enabled) lines.push("warning: smart-compact is disabled; compact context is empty.");
+      const runtime = isRecord(report.smartCompactRuntime) ? report.smartCompactRuntime : getRuntimeStatus();
+      lines.push(
+        `smart-compact runtime: ${runtime.runtimeActive ? "active" : "inactive"} · context applied: ${runtime.contextApplied ? "yes" : "no"} (${runtime.contextApplications}) · compaction guidance: ${runtime.compactionGuidanceApplications}`,
+      );
+      if (!runtime.runtimeActive) lines.push("warning: smart-compact is disabled; compact context is not a runtime-applied context.");
+      else if (!runtime.contextApplied) lines.push("warning: smart-compact is enabled, but no context event has applied its context in this session yet.");
     }
 
     if (request.kind === "compare" && isRecord(report.dialogueComparison)) {
@@ -1870,6 +1908,7 @@ export default function (pi: ExtensionAPI) {
       report.integration = {
         ...integration,
         mode: request.kind,
+        smartCompactRuntime: getRuntimeStatus(),
         sessionId: ctx.sessionManager.getSessionId(),
         sessionFile: ctx.sessionManager.getSessionFile() ?? null,
         comparedSessionId: compared?.manager.getSessionId() ?? null,
@@ -1892,18 +1931,35 @@ export default function (pi: ExtensionAPI) {
   // Runtime activation
   // ---------------------------------------------------------------------------
 
+  function costTokenEstimate(cost: unknown): number {
+    if (isRecord(cost) && typeof cost.estimatedTokens === "number" && Number.isFinite(cost.estimatedTokens)) {
+      return cost.estimatedTokens;
+    }
+    return estimateTokens("");
+  }
+
   function setEnabled(next: boolean, ctx: ExtensionContext): void {
     if (enabled === next) {
       if (next) updateStatus(ctx);
       return;
     }
+
     enabled = next;
     clearState();
+
     if (enabled) {
+      activationSource = "command";
+      enabledAt = new Date().toISOString();
+      contextApplications = 0;
+      lastContextAppliedAt = null;
+      compactionGuidanceApplications = 0;
+      lastCompactionGuidanceAt = null;
       restoreFromCurrentBranch(ctx);
       updateStatus(ctx);
-    } else if (ctx.hasUI) {
-      ctx.ui.setStatus("smart-compact", "disabled");
+    } else {
+      activationSource = "none";
+      enabledAt = null;
+      if (ctx.hasUI) ctx.ui.setStatus("smart-compact", "disabled");
     }
   }
 
@@ -1921,12 +1977,28 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, "smart-compact disabled for this session.", "info");
         return;
       }
-      if (command === "status" || command === "") {
-        notify(ctx, `smart-compact: ${enabled ? "enabled" : "disabled"}${process.env.PI_SMART_COMPACT ? ` (PI_SMART_COMPACT=${process.env.PI_SMART_COMPACT})` : ""}`, "info");
+      if (command === "status" || command === "status --json" || command === "") {
+        const status = getRuntimeStatus();
+        if (command === "status --json") {
+          notify(ctx, JSON.stringify(status), "info");
+        } else {
+          notify(
+            ctx,
+            [
+              `smart-compact: ${enabled ? "ENABLED" : "DISABLED"}`,
+              `runtime active: ${status.runtimeActive ? "yes" : "no"}`,
+              `context applied: ${status.contextApplied ? "yes" : "no"} (${status.contextApplications})`,
+              `compaction guidance: ${status.compactionGuidanceApplied ? "yes" : "no"} (${status.compactionGuidanceApplications})`,
+              `facts: ${status.pinnedFactsCount}/${MAX_PINNED_FACTS}`,
+              `context: ~${costTokenEstimate(status.contextCost)}t`,
+            ].join("\n"),
+            "info",
+          );
+        }
         if (enabled) updateStatus(ctx);
         return;
       }
-      notify(ctx, "Usage: /smart-compact on | off | status", "warning");
+      notify(ctx, "Usage: /smart-compact on | off | status [--json]", "warning");
     },
   });
 
@@ -1962,6 +2034,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_before_compact", (event) => {
     if (!enabled) return;
+    compactionGuidanceApplications++;
+    lastCompactionGuidanceAt = new Date().toISOString();
     const facts = activeFacts();
     const instructions = [
       "Compact the conversation without inventing facts.",
@@ -1974,8 +2048,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("context", (event) => {
     if (!enabled) return;
-    const { text } = getContextBlock();
+    const { text, cost } = getContextBlock();
     if (!text) return;
+    void cost;
+    contextApplications++;
+    lastContextAppliedAt = new Date().toISOString();
     return {
       messages: [
         ...event.messages,
