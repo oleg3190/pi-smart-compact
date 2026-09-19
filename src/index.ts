@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.7.0 production
+ * smart-compact v3.8.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -26,6 +26,9 @@ const execFileAsync = promisify(execFile);
  * - exact character budgets without destructive slicing
  * - injection-resistant persisted-data framing
  *
+ * v3.8.0: added deterministic compression audit metrics to dialogue analysis,
+ *         including priority-weighted recall, omission, estimated token savings,
+ *         budget utilization, contamination proxies, and actionable recommendations.
  * v3.4.0: memoized context assembly by state revision, plus linear-time
  *         compaction probes. Unchanged LLM context is now returned from a
  *         cache instead of being rebuilt on every context/status/tool call.
@@ -1873,6 +1876,35 @@ export default function (pi: ExtensionAPI) {
       if (typeof reduction === "number" && Number.isFinite(reduction)) {
         lines.push("smart-compact context reduction: " + (reduction * 100).toFixed(1) + "%");
       }
+      if (isRecord(report.compressionAudit)) {
+        const compression = isRecord(report.compressionAudit.compression) ? report.compressionAudit.compression : undefined;
+        const recall = isRecord(report.compressionAudit.recall) ? report.compressionAudit.recall : undefined;
+        if (compression) {
+          if (typeof compression.estimatedTokensSaved === "number") {
+            lines.push("estimated tokens saved: " + compression.estimatedTokensSaved);
+          }
+          if (typeof compression.budgetUtilization === "number") {
+            lines.push("budget utilization: " + (compression.budgetUtilization * 100).toFixed(1) + "%");
+          }
+        }
+        if (recall) {
+          if (typeof recall.priorityWeightedRecall === "number") {
+            lines.push("priority-weighted recall: " + (recall.priorityWeightedRecall * 100).toFixed(1) + "%");
+          }
+          if (typeof recall.criticalLoss === "number") {
+            lines.push("critical fact loss: " + recall.criticalLoss);
+          }
+        }
+      }
+      const reportRecommendations = Array.isArray(report.recommendations)
+        ? report.recommendations.filter((item) => isRecord(item))
+        : [];
+      if (reportRecommendations.length > 0) {
+        const top = reportRecommendations[0];
+        if (typeof top.message === "string") {
+          lines.push("recommendation: " + top.message);
+        }
+      }
       const runtime = isRecord(report.smartCompactRuntime) ? report.smartCompactRuntime : getRuntimeStatus();
       lines.push(
         `smart-compact runtime: ${runtime.runtimeActive ? "active" : "inactive"} · context applied: ${runtime.contextApplied ? "yes" : "no"} (${runtime.contextApplications}) · compaction guidance: ${runtime.compactionGuidanceApplications}`,
@@ -1967,17 +1999,7 @@ export default function (pi: ExtensionAPI) {
     description: "Enable, disable, or inspect smart-compact for the current Pi session",
     handler: async (args, ctx) => {
       const command = args.trim().toLowerCase();
-      if (command === "on" || command === "enable") {
-        setEnabled(true, ctx);
-        notify(ctx, "smart-compact enabled for this session.", "info");
-        return;
-      }
-      if (command === "off" || command === "disable") {
-        setEnabled(false, ctx);
-        notify(ctx, "smart-compact disabled for this session.", "info");
-        return;
-      }
-      if (command === "" || command === "on" || command === "enable") {
+      if (command === "") {
         setEnabled(true, ctx);
         notify(ctx, "smart-compact enabled for this session.", "info");
         return;
