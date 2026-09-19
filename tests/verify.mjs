@@ -5,7 +5,7 @@ const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 assert.equal(pkg.version, '3.7.1');
-assert.match(source, /let enabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
+assert.match(source, /const initialRuntimeEnabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);\nassert.match(source, /let enabled = initialRuntimeEnabled;/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
 assert.match(source, /Usage: \/smart-compact on \| off \| status/);
 assert.match(source, /const RUNTIME_STATUS_VERSION = "1.0.0"/);
