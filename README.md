@@ -1,5 +1,12 @@
 # pi-smart-compact
 
+## 3.8.0
+
+- /analyze-dialog compact now emits a deterministic compression audit alongside the LLM evaluation.
+- Reports include estimated token savings, compression ratio/reduction, hard-budget utilization, fact recall, priority-weighted recall, recall by priority tier, omitted fact IDs, index-only facts, contamination/redundancy proxies, and actionable recommendations.
+- The report explicitly identifies the baseline as the active pinned-fact baseline; it is not the full historical model prompt.
+- Estimated token counts remain heuristic unless the evaluator/model reports actual token usage.
+
 ## 3.7.2
 
 - Bare `/smart-compact` now enables smart-compact for the current Pi session. Use `/smart-compact status` for diagnostics and `/smart-compact off` to disable it.
