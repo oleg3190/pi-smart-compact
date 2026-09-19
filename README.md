@@ -1,4 +1,10 @@
-# pi-smart-compact
+## 3.7.0
+
+- Added `/analyze-dialog` for fixed-model dialogue quality analysis directly from Pi.
+- Added `/analyze-dialog compact` to compare the current dialogue against the full active pinned-fact baseline and measure smart-compact context reduction.
+- Added `/analyze-dialog compare previous` and `/analyze-dialog compare <session.jsonl>` to compare the current active branch with another Pi session.
+- Comparison reports include independent per-metric scores, per-metric deltas, mean delta, and grounded narrative differences.
+- Full JSON reports are persisted under the project Pi session directory in `dialog-analysis/`.
 
 Branch-scoped pinned memory for Pi with deterministic journal replay, hard context budgets, injection-resistant fact framing, and token-efficient context packing.
 
