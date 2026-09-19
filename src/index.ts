@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
 /**
- * smart-compact v3.4.2 production
+ * smart-compact v3.6.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
