@@ -516,7 +516,20 @@ async function runEvaluation(options) {
       responseText = textFromContent(assistant?.content);
     }
 
-    const evaluation = normalizeEvaluation(parseJsonObject(responseText));
+    const parsed = parseJsonObject(responseText);
+    const normalizedComparison = options.compareDialogue ? normalizeComparisonEvaluation(parsed) : null;
+    const evaluation = normalizedComparison?.left ?? normalizeEvaluation(parsed);
+    const dialogueComparison = normalizedComparison
+      ? {
+          right: normalizedComparison.right,
+          deltas: normalizedComparison.deltas,
+          meanDelta: normalizedComparison.meanDelta,
+          summary: normalizedComparison.summary,
+          strengths: normalizedComparison.strengths,
+          issues: normalizedComparison.issues,
+          evidence: normalizedComparison.evidence,
+        }
+      : null;
     const activeModel = session.model;
     const durationMs = performance.now() - startedAt;
 
@@ -538,6 +551,7 @@ async function runEvaluation(options) {
       usage: getUsage(session),
       durationMs: Math.round(durationMs * 100) / 100,
       evaluation,
+      dialogueComparison,
     };
   } finally {
     session.dispose();
