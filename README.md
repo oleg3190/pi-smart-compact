@@ -1,3 +1,5 @@
+# pi-smart-compact
+
 ## 3.7.0
 
 - Added `/analyze-dialog` for fixed-model dialogue quality analysis directly from Pi.
