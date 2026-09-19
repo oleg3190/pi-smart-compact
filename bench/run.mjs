@@ -381,7 +381,7 @@ async function main() {
 
   const report = {
     benchmark: "pi-smart-compact packing effectiveness",
-    version: "3.6.0",
+    version: "3.7.0",
     methodology: {
       baseline: "same wrapper + all active facts fully expanded; no compaction",
       smart: "production context handler with hard 10k-character budget",
