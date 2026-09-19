@@ -1977,7 +1977,17 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, "smart-compact disabled for this session.", "info");
         return;
       }
-      if (command === "status" || command === "status --json" || command === "") {
+      if (command === "" || command === "on" || command === "enable") {
+        setEnabled(true, ctx);
+        notify(ctx, "smart-compact enabled for this session.", "info");
+        return;
+      }
+      if (command === "off" || command === "disable") {
+        setEnabled(false, ctx);
+        notify(ctx, "smart-compact disabled for this session.", "info");
+        return;
+      }
+      if (command === "status" || command === "status --json") {
         const status = getRuntimeStatus();
         if (command === "status --json") {
           notify(ctx, JSON.stringify(status), "info");
@@ -1995,10 +2005,9 @@ export default function (pi: ExtensionAPI) {
             "info",
           );
         }
-        if (enabled) updateStatus(ctx);
         return;
       }
-      notify(ctx, "Usage: /smart-compact on | off | status [--json]", "warning");
+      notify(ctx, "Usage: /smart-compact [on|off|status [--json]]", "warning");
     },
   });
 

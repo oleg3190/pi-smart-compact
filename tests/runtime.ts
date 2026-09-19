@@ -152,6 +152,18 @@ assert.equal(runtimeStatus.enabled, false);
 assert.equal(runtimeStatus.runtimeActive, false);
 assert.equal(runtimeStatus.contextApplied, true);
 
+const bareEnable = makeHarness([], "normal", true);
+await start(bareEnable, false);
+await bareEnable.commands.get("smart-compact")?.handler("", bareEnable.ctx);
+assert.match(bareEnable.notifications.at(-1).text, /enabled/i);
+assert.ok(bareEnable.commands.get("smart-compact"));
+
+await checkpoint(bareEnable, {
+  type: "finding",
+  fact: "Bare command enable test fact.",
+});
+assert.ok(bareEnable.handlers.get("context")({ messages: [] }, bareEnable.ctx));
+
 const disabled = makeHarness();
 await start(disabled, false);
 assert.equal(disabled.handlers.get("context")({ messages: [] }, disabled.ctx), undefined);
