@@ -1673,6 +1673,7 @@ export default function (pi: ExtensionAPI) {
   type AnalyzeDialogRequest =
     | { kind: "current" }
     | { kind: "compact" }
+    | { kind: "counterfactual" }
     | { kind: "compare"; target: string };
 
   function parseAnalyzeDialogArgs(raw: string): AnalyzeDialogRequest {
@@ -1684,8 +1685,14 @@ export default function (pi: ExtensionAPI) {
     const rest = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();
 
     if (command === "compact") {
-      if (rest) throw new Error("Usage: /analyze-dialog compact");
-      return { kind: "compact" };
+      if (!rest) return { kind: "compact" };
+      if (rest === "replay") return { kind: "counterfactual" };
+      throw new Error("Usage: /analyze-dialog compact [replay]");
+    }
+
+    if (command === "counterfactual" || command === "replay") {
+      if (rest) throw new Error("Usage: /analyze-dialog counterfactual");
+      return { kind: "counterfactual" };
     }
 
     if (command === "compare") {
@@ -1693,7 +1700,7 @@ export default function (pi: ExtensionAPI) {
       return { kind: "compare", target: rest };
     }
 
-    throw new Error("Usage: /analyze-dialog | compact | compare previous|<session.jsonl>");
+    throw new Error("Usage: /analyze-dialog | compact [replay] | counterfactual | compare previous|<session.jsonl>");
   }
 
   function dialogAnalyzerScriptPath(): string {
@@ -1795,7 +1802,7 @@ export default function (pi: ExtensionAPI) {
 
       const args = [dialogAnalyzerScriptPath(), "--dialog", primaryFile];
 
-      if (request.kind === "compact") {
+      if (request.kind === "compact" || request.kind === "counterfactual") {
         const compact = getContextBlock().text;
         const baseline = fullPinnedContext(activeFacts());
         const runtimeStatus = getRuntimeStatus();
@@ -1806,6 +1813,7 @@ export default function (pi: ExtensionAPI) {
         await writeFile(baselineFile, baseline, "utf8");
         await writeFile(runtimeStatusFile, JSON.stringify(runtimeStatus, null, 2) + "\n", "utf8");
         args.push("--compact-context", compactFile, "--baseline-context", baselineFile, "--runtime-status", runtimeStatusFile);
+        if (request.kind === "counterfactual") args.push("--counterfactual-replay");
       }
 
       if (request.kind === "compare") {
@@ -1830,8 +1838,10 @@ export default function (pi: ExtensionAPI) {
       });
 
       const report = JSON.parse(String(result.stdout)) as Record<string, unknown>;
-      if (!report.evaluation || typeof report.evaluation !== "object") {
-        throw new Error("Dialogue evaluator returned an invalid report.");
+      const hasEvaluation = report.evaluation && typeof report.evaluation === "object";
+      const hasCounterfactual = report.counterfactualReplay && typeof report.counterfactualReplay === "object";
+      if (!hasEvaluation && !hasCounterfactual) {
+        throw new Error("Dialogue analyzer returned an invalid report.");
       }
       return report;
     } finally {
@@ -1870,6 +1880,26 @@ export default function (pi: ExtensionAPI) {
     const evaluation = isRecord(report.evaluation) ? report.evaluation : undefined;
     const meanScore = evaluation?.meanScore;
     const lines = ["dialogue analysis: " + formatDialogScore(meanScore) + "/100"];
+
+    if (request.kind === "counterfactual" && isRecord(report.counterfactualReplay)) {
+      const replay = report.counterfactualReplay;
+      const quality = isRecord(replay.quality) ? replay.quality : undefined;
+      const usage = isRecord(replay.usageComparison) ? replay.usageComparison : undefined;
+      lines[0] = "counterfactual replay";
+      if (quality && typeof quality.meanDelta === "number") {
+        lines.push("quality delta (COMPACT - BASELINE): " + formatDialogDelta(quality.meanDelta));
+      }
+      if (quality && typeof quality?.deltas === "object" && quality.deltas && typeof quality.deltas.taskCompletion === "number") {
+        lines.push("task completion delta: " + formatDialogDelta(quality.deltas.taskCompletion));
+      }
+      if (usage && typeof usage.inputTokensSaved === "number") {
+        lines.push("actual input tokens saved: " + usage.inputTokensSaved);
+      }
+      if (typeof quality?.summary === "string" && quality.summary.trim()) {
+        lines.push(quality.summary.trim());
+      }
+      lines.push("paired replay: same task · same target model · context is the intended variable");
+    }
 
     if (request.kind === "compact" && isRecord(report.contextComparison)) {
       const reduction = report.contextComparison.reduction;
