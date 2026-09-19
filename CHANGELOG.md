@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.0 — 2026-09-19
+- Added per-session runtime activation via `/smart-compact on|off|status`.
+- Added startup activation via `PI_SMART_COMPACT=on|1|true` for dedicated agents/sub-agents.
+- Disabled mode keeps context, compaction, and tree hooks inert and guards checkpoint operations.
+
+
 ## 3.4.2 — 2026-09-18
 - Added deterministic effectiveness benchmark for pressure compression, priority recall, stale/revoke exclusion, branch isolation, adversarial framing, and snapshot replay.
 - CI now executes `npm run bench` and enforces objective packing/reliability thresholds.

@@ -139,7 +139,8 @@ function makeHarness(initialEntries = []) {
   return { handlers, commands, branch, ctx };
 }
 
-async function start(harness) {
+async function start(harness, enabled = true) {
+  if (enabled) await harness.commands.get("smart-compact")?.handler("on", harness.ctx);
   await harness.handlers.get("session_start")?.({ reason: "startup" }, harness.ctx);
 }
 
@@ -380,7 +381,7 @@ async function main() {
 
   const report = {
     benchmark: "pi-smart-compact packing effectiveness",
-    version: "3.4.2",
+    version: "3.5.0",
     methodology: {
       baseline: "same wrapper + all active facts fully expanded; no compaction",
       smart: "production context handler with hard 10k-character budget",
