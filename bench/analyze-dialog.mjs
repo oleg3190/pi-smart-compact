@@ -692,7 +692,7 @@ function unescapeXml(text) {
 
 function parseFactAttributes(raw) {
   const get = (name) => {
-    const pattern = new RegExp("\\\\b" + name + "=\"([^\"]*)\"");
+    const pattern = new RegExp("\\b" + name + "=\"([^\"]*)\"");
     const match = raw.match(pattern);
     return match ? match[1] : null;
   };
