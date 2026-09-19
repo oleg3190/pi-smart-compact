@@ -1889,8 +1889,9 @@ export default function (pi: ExtensionAPI) {
       if (quality && typeof quality.meanDelta === "number") {
         lines.push("quality delta (COMPACT - BASELINE): " + formatDialogDelta(quality.meanDelta));
       }
-      if (quality && typeof quality?.deltas === "object" && quality.deltas && typeof quality.deltas.taskCompletion === "number") {
-        lines.push("task completion delta: " + formatDialogDelta(quality.deltas.taskCompletion));
+      const qualityDeltas = quality && isRecord(quality.deltas) ? quality.deltas : undefined;
+      if (qualityDeltas && typeof qualityDeltas.taskCompletion === "number") {
+        lines.push("task completion delta: " + formatDialogDelta(qualityDeltas.taskCompletion));
       }
       if (usage && typeof usage.inputTokensSaved === "number") {
         lines.push("actual input tokens saved: " + usage.inputTokensSaved);
