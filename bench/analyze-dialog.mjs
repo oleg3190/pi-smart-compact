@@ -577,7 +577,14 @@ function parseModelSelection(options) {
   return { provider, modelId };
 }
 
-function buildReportInputs(sourceDialogue, dialogue, compactContext, baselineContext) {
+function buildReportInputs(
+  sourceDialogue,
+  dialogue,
+  compactContext,
+  baselineContext,
+  sourceComparisonDialogue,
+  renderedComparisonDialogue,
+) {
   return {
     dialogue: {
       messages: sourceDialogue.messages.length,
@@ -612,6 +619,14 @@ function buildReportInputs(sourceDialogue, dialogue, compactContext, baselineCon
                 : 0,
           }
         : null,
+    comparisonDialogue: sourceComparisonDialogue && renderedComparisonDialogue
+      ? {
+          messages: sourceComparisonDialogue.messages.length,
+          sourceChars: sourceComparisonDialogue.sourceChars,
+          analyzedChars: renderedComparisonDialogue.text.length,
+          truncated: renderedComparisonDialogue.truncated,
+        }
+      : null,
   };
 }
 
