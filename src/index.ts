@@ -1930,6 +1930,14 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("analyze-dialog", {
+    description: "Analyze the current dialogue, smart-compact context, or compare with another Pi session",
+    handler: async (args, ctx) => {
+      if (!ctx.isIdle()) await ctx.waitForIdle();
+      await handleAnalyzeDialogCommand(args, ctx);
+    },
+  });
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
