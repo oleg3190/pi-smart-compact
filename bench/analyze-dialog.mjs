@@ -713,20 +713,40 @@ async function main() {
     args.baselineContext,
     Number(args.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS),
   );
+  const comparisonDialogue = args.compareDialog ? await readDialogue(args.compareDialog) : null;
+  const renderedComparisonDialogue = comparisonDialogue
+    ? renderTranscript(
+        comparisonDialogue.messages,
+        Number(args.maxDialogChars ?? DEFAULT_MAX_DIALOG_CHARS),
+      )
+    : null;
 
-  const prompt = buildEvaluationPrompt(renderedDialogue, compactContext, baselineContext);
+  const prompt = buildEvaluationPrompt(
+    renderedDialogue,
+    compactContext,
+    baselineContext,
+    renderedComparisonDialogue,
+  );
   const startedAt = new Date().toISOString();
   const result = await runEvaluation({
     model: args.model,
     provider: args.provider,
     thinking: args.thinking ?? process.env.PI_BENCH_THINKING ?? "off",
     prompt,
+    compareDialogue: Boolean(renderedComparisonDialogue),
   });
 
   const report = {
-    reportVersion: "1.0.0",
+    reportVersion: "1.1.0",
     generatedAt: startedAt,
-    ...buildReportInputs(dialogue, renderedDialogue, compactContext, baselineContext),
+    ...buildReportInputs(
+      dialogue,
+      renderedDialogue,
+      compactContext,
+      baselineContext,
+      comparisonDialogue,
+      renderedComparisonDialogue,
+    ),
     ...result,
   };
 
