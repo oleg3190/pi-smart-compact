@@ -1,12 +1,13 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  SessionEntry,
+import {
+  SessionManager,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, join, resolve as resolvePathname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Type } from "typebox";
