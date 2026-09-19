@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.6.0 — 2026-09-19
+- Added a fixed-model dialogue evaluator via `npm run bench:dialog`.
+- Supports Pi JSON/JSONL sessions, generic role/content JSONL, and plain-text transcripts.
+- Records exact provider/model/thinking level, evaluator version, token usage, cost when reported, and latency.
+- Reports task completion, instruction following, context retention, stale-memory resistance, prompt-injection resistance, and related quality metrics.
+- Added optional smart-compact vs baseline context comparison inputs.
+- CI validates the evaluator parser/schema without making paid external LLM calls.
+
+
 ## 3.5.0 — 2026-09-19
 - Added per-session runtime activation via `/smart-compact on|off|status`.
 - Added startup activation via `PI_SMART_COMPACT=on|1|true` for dedicated agents/sub-agents.
