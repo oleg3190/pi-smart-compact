@@ -908,7 +908,7 @@ function buildCompressionAudit(compactContext, baselineContext) {
       ),
     },
     payload: {
-      expandedFactPayloadChars,
+      expandedPayloadChars,
       semanticPayloadRatio: safeRatio(expandedPayloadChars, compactChars),
     },
     facts: {
