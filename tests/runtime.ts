@@ -46,7 +46,8 @@ function makeHarness(initialEntries = [], appendMode = "normal") {
   return { handlers, tools, commands, branch, ctx };
 }
 
-async function start(h) {
+async function start(h, enabled = true) {
+  if (enabled) await h.commands.get("smart-compact")?.handler("on", h.ctx);
   await h.handlers.get("session_start")?.({ reason: "startup" }, h.ctx);
 }
 
