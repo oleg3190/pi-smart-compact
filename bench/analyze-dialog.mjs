@@ -151,18 +151,31 @@ function collectMessages(value, out = []) {
 
   if (value.type === "message_end" && value.message) {
     const msg = normalizeMessage(value.message);
+    if (msg && !msg.id && typeof value.id === "string") msg.id = value.id;
     if (msg) out.push(msg);
     return out;
   }
 
   if (value.type === "message" && value.message) {
     const msg = normalizeMessage(value.message);
+    if (msg && !msg.id && typeof value.id === "string") msg.id = value.id;
     if (msg) out.push(msg);
+    return out;
+  }
+
+  if (Array.isArray(value.messages)) {
+    collectMessages(value.messages, out);
+    return out;
+  }
+
+  if (Array.isArray(value.dialogue)) {
+    collectMessages(value.dialogue, out);
     return out;
   }
 
   if (value.message && typeof value.message === "object") {
     const msg = normalizeMessage(value.message);
+    if (msg && !msg.id && typeof value.id === "string") msg.id = value.id;
     if (msg) out.push(msg);
     return out;
   }
@@ -179,9 +192,6 @@ function dedupeMessages(messages) {
     if (message.id) {
       if (seenIds.has(message.id)) continue;
       seenIds.add(message.id);
-    } else {
-      const fingerprint = `${message.role}\n${message.content}`;
-      if (out.some((item) => !item.id && `${item.role}\n${item.content}` === fingerprint)) continue;
     }
     out.push(message);
   }
@@ -549,6 +559,23 @@ async function selfTest() {
 
   const collected = dedupeMessages(collectMessages(fixture));
   assert.equal(collected.length, 4);
+
+  const sessionFixture = [
+    {
+      type: "message",
+      id: "entry-1",
+      message: { role: "user", content: "Repeated" },
+    },
+    {
+      type: "message",
+      id: "entry-2",
+      message: { role: "user", content: "Repeated" },
+    },
+  ];
+  const sessionMessages = dedupeMessages(collectMessages(sessionFixture));
+  assert.equal(sessionMessages.length, 2);
+  assert.equal(sessionMessages[0].id, "entry-1");
+  assert.equal(sessionMessages[1].id, "entry-2");
   assert.equal(collected[0].role, "user");
   assert.equal(collected[3].content, "The deployment target is staging.");
 
