@@ -1,5 +1,13 @@
 # pi-smart-compact
 
+## 3.10.0
+
+- `/analyze-dialog` now uses the active model and thinking level of the current Pi chat by default; `PI_BENCH_MODEL` is only a fallback when no active chat model is available.
+- Added `/analyze-dialog subagents` to discover child sessions linked to the current chat.
+- Added `/analyze-dialog subagent <index|id|path>` to run dialogue-quality analysis on a selected child session.
+- Child discovery follows Pi `parentSession` lineage and the parent-derived subagent session directory, while ignoring unrelated sessions.
+- `/analyze-dialog counterfactual` also uses the current chat model for the replay target by default.
+
 ## 3.9.2
 
 - `/analyze-dialog` now reads `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, `PI_BENCH_THINKING`, and replay settings from the current project's `.env` / `.env.local`.
@@ -109,4 +117,4 @@ The deterministic benchmark intentionally does not call an external LLM in CI. F
 npm run bench:dialog -- --dialog ./dialog.jsonl --model anthropic/claude-sonnet-4-5
 ```
 
-Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` pin the evaluator configuration for reproducible runs. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator, replay target, and configuration source. Project `.env` / `.env.local` values are supported, while real process environment variables take precedence. For counterfactual replay, the current Pi session model is used automatically unless `PI_REPLAY_MODEL` / `PI_REPLAY_PROVIDER` override it.
+Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` remain available for standalone `npm run bench:dialog` runs and as fallbacks when the interactive chat has no active model. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator, replay target, and configuration source. Project `.env` / `.env.local` values remain supported as configuration fallbacks. For in-chat analysis, the active Pi model and thinking level take precedence automatically. `/analyze-dialog subagents` lists child sessions linked to the current chat, and `/analyze-dialog subagent <index|id|path>` analyzes a selected child session.
