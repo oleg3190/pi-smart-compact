@@ -1960,7 +1960,7 @@ export default function (pi: ExtensionAPI) {
         const location = relative(process.cwd(), session.path) || session.path;
         const modified = session.modifiedAt || session.createdAt || "unknown";
         return String(index + 1).padStart(2, " ") +
-          ". " + session.id.slice(0, 12) +
+          ". " + session.id +
           " · " + modified +
           " · " + location;
       }),
@@ -2206,7 +2206,7 @@ export default function (pi: ExtensionAPI) {
     try {
       const primaryFile = join(tempDir, "primary.json");
       if (dialogPath) {
-        const selectedManager = SessionManager.open(dialogPath, ctx.sessionManager.getSessionDir());
+        const selectedManager = SessionManager.open(dialogPath, dirname(dialogPath));
         if (!branchHasMessage(selectedManager.getBranch())) {
           throw new Error("Selected subagent session has no dialogue messages.");
         }
