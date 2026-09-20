@@ -1,5 +1,10 @@
 # pi-smart-compact
 
+## 3.10.3
+
+- Dialogue evaluation now uses a dedicated structured tool-call result channel, avoiding dependence on plain-text JSON from routed/free models.
+- Plain-text JSON parsing remains a compatibility fallback, and failed evaluations include a short response preview for diagnosis.
+
 ## 3.10.2
 
 - Hardened dialogue evaluator JSON parsing against prose-wrapped/fenced JSON and braces inside JSON strings.
