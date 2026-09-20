@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import smartCompact from "../src/index.ts";
 
-function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false) {
+function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false, cwd = process.cwd()) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
@@ -34,6 +36,7 @@ function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false) 
 
   const ctx = {
     hasUI,
+    cwd,
     isIdle: () => true,
     waitForIdle: async () => {},
     model: {
@@ -124,6 +127,32 @@ async function forget(h, params) {
 
 async function list(h, params = {}) {
   return tool(h, "checkpoint_list").execute("test", params, undefined, undefined, h.ctx);
+}
+
+const envDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-env-test-"));
+const savedBenchModelForEnvTest = process.env.PI_BENCH_MODEL;
+const savedBenchProviderForEnvTest = process.env.PI_BENCH_PROVIDER;
+try {
+  delete process.env.PI_BENCH_MODEL;
+  delete process.env.PI_BENCH_PROVIDER;
+  await writeFile(
+    join(envDir, ".env"),
+    "PI_BENCH_MODEL=anthropic/from-project-dotenv\nPI_BENCH_THINKING=low\n",
+    "utf8",
+  );
+  const envHarness = makeHarness([], "normal", true, envDir);
+  await envHarness.commands.get("analyze-dialog")?.handler("status", envHarness.ctx);
+  assert.match(envHarness.notifications.at(-1).text, /fixed evaluator: anthropic\/from-project-dotenv \(\.env\)/);
+  assert.match(envHarness.notifications.at(-1).text, /replay thinking: low \(\.env\)/);
+  await envHarness.commands.get("analyze-dialog")?.handler("status --json", envHarness.ctx);
+  const envStatus = JSON.parse(envHarness.notifications.at(-1).text);
+  assert.equal(envStatus.evaluator.configured, true);
+  assert.equal(envStatus.evaluator.modelId, "from-project-dotenv");
+  assert.equal(envStatus.evaluator.source, ".env");
+} finally {
+  if (savedBenchModelForEnvTest === undefined) delete process.env.PI_BENCH_MODEL; else process.env.PI_BENCH_MODEL = savedBenchModelForEnvTest;
+  if (savedBenchProviderForEnvTest === undefined) delete process.env.PI_BENCH_PROVIDER; else process.env.PI_BENCH_PROVIDER = savedBenchProviderForEnvTest;
+  await rm(envDir, { recursive: true, force: true });
 }
 
 const analyzeStatus = makeHarness([], "normal", true);
