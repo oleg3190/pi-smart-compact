@@ -32,7 +32,7 @@ assert.match(source, /getAnalyzeDialogStatus/);
 assert.match(source, /parseDotEnv/);
 assert.match(source, /loadAnalyzeDialogConfig/);
 assert.match(source, /\.env\.local/);
-assert.match(source, /in \.env or the process environment/);
+assert.match(source, /as fallback/);
 assert.match(source, /--replay-model/);
 assert.match(source, /No analysis model is available/);
 assert.match(source, /Usage: \/analyze-dialog status \[--json\]/);
