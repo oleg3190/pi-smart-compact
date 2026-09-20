@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.10.2 production
+ * smart-compact v3.10.3 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
