@@ -1,5 +1,11 @@
 # pi-smart-compact
 
+## 3.10.2
+
+- Hardened dialogue evaluator JSON parsing against prose-wrapped/fenced JSON and braces inside JSON strings.
+- Added one automatic recovery prompt when the active evaluator model violates the JSON-only contract.
+- Strengthened the evaluator system prompt so refusals/prose are not treated as valid analyzer output.
+
 ## 3.10.1
 
 - Added `/smart-compact help` with a Russian reference for every slash command and its purpose.
