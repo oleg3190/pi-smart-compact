@@ -2153,6 +2153,13 @@ export default function (pi: ExtensionAPI) {
           || ctx.thinkingLevel
           || config.values.PI_BENCH_THINKING
           || "off",
+        thinkingSource: config.values.PI_REPLAY_THINKING
+          ? config.sources.PI_REPLAY_THINKING
+          : ctx.thinkingLevel
+            ? "current-session"
+            : config.values.PI_BENCH_THINKING
+              ? config.sources.PI_BENCH_THINKING
+              : "missing",
       },
       currentSessionModel: currentModel,
       configFiles: [".env", ".env.local"],
