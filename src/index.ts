@@ -1804,6 +1804,195 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  interface DiscoveredChildSession {
+    path: string;
+    id: string;
+    cwd: string;
+    parentSession: string | null;
+    createdAt: string;
+    modifiedAt: string;
+  }
+
+  function normalizeSessionLink(value: string, baseDir: string): string {
+    return resolvePathname(baseDir, value);
+  }
+
+  async function readSessionHeader(filePath: string): Promise<Record<string, unknown> | null> {
+    let handle;
+    try {
+      handle = await open(filePath, "r");
+      const buffer = Buffer.alloc(128 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+      const firstLine = buffer.subarray(0, newline >= 0 ? newline : bytesRead).toString("utf8").trim();
+      if (!firstLine) return null;
+      const parsed: unknown = JSON.parse(firstLine);
+      if (!isRecord(parsed) || parsed.type !== "session" || typeof parsed.id !== "string") return null;
+      return parsed;
+    } catch {
+      return null;
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
+  async function collectSessionFiles(root: string, maxDepth = 5, limit = 2000): Promise<string[]> {
+    const results: string[] = [];
+    const seen = new Set<string>();
+
+    async function walk(dir: string, depth: number): Promise<void> {
+      if (results.length >= limit || depth < 0) return;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (results.length >= limit) break;
+        const path = join(dir, entry.name);
+        if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+          const normalized = resolvePathname(path);
+          if (!seen.has(normalized)) {
+            seen.add(normalized);
+            results.push(normalized);
+          }
+        } else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          await walk(path, depth - 1);
+        }
+      }
+    }
+
+    await walk(root, maxDepth);
+    return results;
+  }
+
+  async function configuredSubagentSessionRoots(): Promise<string[]> {
+    const roots = [join(homedir(), ".pi", "agent", "sessions", "subagent")];
+    try {
+      const configPath = join(homedir(), ".pi", "agent", "extensions", "subagent", "config.json");
+      const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
+      if (isRecord(parsed) && typeof parsed.defaultSessionDir === "string" && parsed.defaultSessionDir.trim()) {
+        const configured = parsed.defaultSessionDir.trim();
+        roots.push(
+          configured.startsWith("~/")
+            ? join(homedir(), configured.slice(2))
+            : resolvePathname(process.cwd(), configured),
+        );
+      }
+    } catch {
+      // Optional pi-subagents config.
+    }
+    return [...new Set(roots.map(resolvePathname))];
+  }
+
+  async function discoverChildSessions(ctx: ExtensionContext): Promise<DiscoveredChildSession[]> {
+    const currentSessionFile = ctx.sessionManager.getSessionFile();
+    if (!currentSessionFile) return [];
+
+    const currentPath = resolvePathname(currentSessionFile);
+    const currentSessionDir = resolvePathname(ctx.sessionManager.getSessionDir());
+    const currentStem = basename(currentPath).replace(/\.jsonl$/i, "");
+    const derivedRoot = join(currentSessionDir, currentStem);
+
+    const roots = [currentSessionDir, derivedRoot, ...(await configuredSubagentSessionRoots())];
+    const files = [...new Set(
+      (await Promise.all(roots.map((root) => collectSessionFiles(root)))).flat(),
+    )];
+
+    const metadata = new Map<string, DiscoveredChildSession>();
+    const parentByPath = new Map<string, string | null>();
+
+    for (const filePath of files) {
+      if (filePath === currentPath) continue;
+      const header = await readSessionHeader(filePath);
+      if (!header) continue;
+
+      const parentRaw = typeof header.parentSession === "string" ? header.parentSession : null;
+      const parent = parentRaw ? normalizeSessionLink(parentRaw, dirname(filePath)) : null;
+      const cwd = typeof header.cwd === "string" ? header.cwd : "";
+      const createdAt = typeof header.timestamp === "string" ? header.timestamp : "";
+      let modifiedAt = createdAt;
+      try {
+        modifiedAt = (await stat(filePath)).mtime.toISOString();
+      } catch {
+        // Keep header timestamp.
+      }
+
+      const session: DiscoveredChildSession = {
+        path: filePath,
+        id: header.id as string,
+        cwd,
+        parentSession: parent,
+        createdAt,
+        modifiedAt,
+      };
+      metadata.set(filePath, session);
+      parentByPath.set(filePath, parent);
+    }
+
+    const derivedHint = derivedRoot + "/";
+    const isDescendant = (path: string): boolean => {
+      if (path.startsWith(derivedHint)) return true;
+
+      const seen = new Set<string>();
+      let cursor: string | null = path;
+      while (cursor && cursor !== currentPath && !seen.has(cursor)) {
+        seen.add(cursor);
+        cursor = parentByPath.get(cursor) ?? null;
+      }
+      return cursor === currentPath;
+    };
+
+    return [...metadata.values()]
+      .filter((session) => isDescendant(session.path))
+      .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  }
+
+  function formatChildSessionList(sessions: readonly DiscoveredChildSession[]): string {
+    if (sessions.length === 0) {
+      return "No child/subagent sessions linked to the current Pi chat were found.";
+    }
+
+    return [
+      "subagent sessions:",
+      ...sessions.map((session, index) => {
+        const location = relative(process.cwd(), session.path) || session.path;
+        const modified = session.modifiedAt || session.createdAt || "unknown";
+        return String(index + 1).padStart(2, " ") +
+          ". " + session.id.slice(0, 12) +
+          " · " + modified +
+          " · " + location;
+      }),
+      "",
+      "Analyze one with: /analyze-dialog subagent <index|id|path>",
+    ].join("\n");
+  }
+
+  function resolveChildSession(
+    target: string,
+    sessions: readonly DiscoveredChildSession[],
+  ): DiscoveredChildSession {
+    const value = target.trim();
+    const numeric = Number(value);
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= sessions.length) {
+      return sessions[numeric - 1];
+    }
+
+    const exactPath = resolvePathname(process.cwd(), value);
+    const exact = sessions.find((session) => session.path === exactPath);
+    if (exact) return exact;
+
+    const exactId = sessions.find((session) => session.id === value);
+    if (exactId) return exactId;
+
+    const prefix = sessions.filter((session) => session.id.startsWith(value));
+    if (prefix.length === 1) return prefix[0];
+    if (prefix.length > 1) throw new Error("Subagent session id prefix is ambiguous: " + value);
+
+    throw new Error("Subagent session not found: " + value);
+  }
+
   function parseConfiguredModel(raw: string, providerOverride = ""): { provider: string; modelId: string } | null {
     const requestedModel = raw.trim();
     let provider = providerOverride.trim();
