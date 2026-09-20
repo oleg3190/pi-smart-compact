@@ -5,7 +5,7 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve as resolvePathname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.9.1 production
+ * smart-compact v3.9.2 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1805,14 +1805,116 @@ export default function (pi: ExtensionAPI) {
     return { provider, modelId };
   }
 
-  function getAnalyzeDialogStatus(ctx: ExtensionContext): Record<string, unknown> {
+  type AnalyzeDialogConfigSource = "process.env" | ".env.local" | ".env" | "missing";
+
+  interface AnalyzeDialogConfig {
+    values: Partial<Record<
+      "PI_BENCH_MODEL" |
+      "PI_BENCH_PROVIDER" |
+      "PI_BENCH_THINKING" |
+      "PI_REPLAY_MODEL" |
+      "PI_REPLAY_PROVIDER" |
+      "PI_REPLAY_THINKING",
+      string
+    >>;
+    sources: Partial<Record<
+      "PI_BENCH_MODEL" |
+      "PI_BENCH_PROVIDER" |
+      "PI_BENCH_THINKING" |
+      "PI_REPLAY_MODEL" |
+      "PI_REPLAY_PROVIDER" |
+      "PI_REPLAY_THINKING",
+      AnalyzeDialogConfigSource
+    >>;
+  }
+
+  function parseDotEnv(content: string): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const rawLine of content.split(/\r?\n/)) {
+      let line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      line = line.replace(/^export\s+/, "");
+      const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!match) continue;
+
+      const key = match[1];
+      let value = match[2].trim();
+
+      if (value.startsWith('"')) {
+        if (value.endsWith('"') && value.length >= 2) {
+          value = value
+            .slice(1, -1)
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "\r")
+            .replace(/\\t/g, "\t")
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, "\\");
+        } else {
+          continue;
+        }
+      } else if (value.startsWith("'")) {
+        if (value.endsWith("'") && value.length >= 2) value = value.slice(1, -1);
+        else continue;
+      } else {
+        value = value.replace(/\s+#.*$/, "").trim();
+      }
+
+      values[key] = value;
+    }
+    return values;
+  }
+
+  async function loadAnalyzeDialogConfig(cwd: string): Promise<AnalyzeDialogConfig> {
+    const keys = [
+      "PI_BENCH_MODEL",
+      "PI_BENCH_PROVIDER",
+      "PI_BENCH_THINKING",
+      "PI_REPLAY_MODEL",
+      "PI_REPLAY_PROVIDER",
+      "PI_REPLAY_THINKING",
+    ] as const;
+
+    const values: AnalyzeDialogConfig["values"] = {};
+    const sources: AnalyzeDialogConfig["sources"] = {};
+
+    for (const fileName of [".env", ".env.local"] as const) {
+      try {
+        const content = await readFile(join(cwd, fileName), "utf8");
+        const parsed = parseDotEnv(content);
+        for (const key of keys) {
+          const value = parsed[key];
+          if (value !== undefined && value.trim() !== "") {
+            values[key] = value.trim();
+            sources[key] = fileName;
+          }
+        }
+      } catch (error) {
+        if (!isRecord(error) || error.code !== "ENOENT") throw error;
+      }
+    }
+
+    for (const key of keys) {
+      const processValue = process.env[key]?.trim();
+      if (processValue) {
+        values[key] = processValue;
+        sources[key] = "process.env";
+      } else if (!sources[key]) {
+        sources[key] = "missing";
+      }
+    }
+
+    return { values, sources };
+  }
+
+  async function getAnalyzeDialogStatus(ctx: ExtensionContext): Promise<Record<string, unknown>> {
+    const config = await loadAnalyzeDialogConfig(ctx.cwd);
     const evaluator = parseConfiguredModel(
-      process.env.PI_BENCH_MODEL ?? "",
-      process.env.PI_BENCH_PROVIDER ?? "",
+      config.values.PI_BENCH_MODEL ?? "",
+      config.values.PI_BENCH_PROVIDER ?? "",
     );
     const replayOverride = parseConfiguredModel(
-      process.env.PI_REPLAY_MODEL ?? "",
-      process.env.PI_REPLAY_PROVIDER ?? "",
+      config.values.PI_REPLAY_MODEL ?? "",
+      config.values.PI_REPLAY_PROVIDER ?? "",
     );
     const currentModel =
       ctx.model?.provider && ctx.model.id
@@ -1820,7 +1922,7 @@ export default function (pi: ExtensionAPI) {
         : null;
 
     const replayTarget = replayOverride
-      ? { ...replayOverride, source: "env" as const }
+      ? { ...replayOverride, source: config.sources.PI_REPLAY_MODEL === "missing" ? "env" as const : config.sources.PI_REPLAY_MODEL }
       : currentModel
         ? { ...currentModel, source: "current-session" as const }
         : evaluator
@@ -1828,25 +1930,31 @@ export default function (pi: ExtensionAPI) {
           : { provider: null, modelId: null, source: "unavailable" as const };
 
     return {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       evaluator: {
         configured: evaluator !== null,
         provider: evaluator?.provider ?? null,
         modelId: evaluator?.modelId ?? null,
-        source: evaluator ? "PI_BENCH_MODEL" : "missing",
+        source: config.sources.PI_BENCH_MODEL,
       },
       replay: {
         provider: replayTarget.provider,
         modelId: replayTarget.modelId,
         source: replayTarget.source,
-        thinking: process.env.PI_REPLAY_THINKING?.trim()
-          || process.env.PI_BENCH_THINKING?.trim()
+        thinking: config.values.PI_REPLAY_THINKING
+          || config.values.PI_BENCH_THINKING
           || "off",
+        thinkingSource: config.values.PI_REPLAY_THINKING
+          ? config.sources.PI_REPLAY_THINKING
+          : config.values.PI_BENCH_THINKING
+            ? config.sources.PI_BENCH_THINKING
+            : "missing",
       },
       currentSessionModel: currentModel,
+      configFiles: [".env", ".env.local"],
       guidance: evaluator
         ? "Fixed evaluator is configured. Counterfactual replay uses the current session model unless PI_REPLAY_MODEL/PI_REPLAY_PROVIDER overrides it."
-        : "Set PI_BENCH_MODEL=provider/model for semantic dialogue evaluation. Counterfactual replay can use the current session model after the evaluator is configured.",
+        : "Set PI_BENCH_MODEL=provider/model in the project .env or process environment before running semantic analysis.",
     };
   }
 
@@ -1863,21 +1971,23 @@ export default function (pi: ExtensionAPI) {
       : "UNAVAILABLE";
     return [
       "analyze-dialog configuration",
-      "fixed evaluator: " + evaluatorName,
+      "fixed evaluator: " + evaluatorName + " (" + String(evaluator.source) + ")",
       "replay target: " + replayName + " (" + String(replay.source) + ")",
-      "replay thinking: " + String(replay.thinking),
+      "replay thinking: " + String(replay.thinking) + " (" + String(replay.thinkingSource) + ")",
       "current session model: " + (current ? String(current.provider) + "/" + String(current.modelId) : "unavailable"),
       evaluatorConfigured
         ? "ready: /analyze-dialog, /analyze-dialog compact, /analyze-dialog counterfactual"
-        : "not ready: set PI_BENCH_MODEL=provider/model before running semantic analysis",
+        : "not ready: set PI_BENCH_MODEL=provider/model in .env or the process environment",
     ].join("\n");
   }
+
   async function invokeDialogAnalyzer(
     ctx: ExtensionContext,
     request: AnalyzeDialogRequest,
     compared?: { path: string; manager: SessionManager },
   ): Promise<Record<string, unknown>> {
     const tempDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-dialog-"));
+    const config = await loadAnalyzeDialogConfig(ctx.cwd);
 
     try {
       const currentBranch = ctx.sessionManager.getBranch();
@@ -1909,22 +2019,37 @@ export default function (pi: ExtensionAPI) {
         args.push("--compare-dialog", comparisonFile);
       }
 
-      const evaluatorModel = process.env.PI_BENCH_MODEL?.trim();
+      const evaluatorModel = config.values.PI_BENCH_MODEL?.trim();
       if (!evaluatorModel) {
         throw new Error(
-          "Fixed evaluator model is not configured. Set PI_BENCH_MODEL=provider/model before using /analyze-dialog. Use /analyze-dialog status to inspect evaluator and replay configuration.",
+          "Fixed evaluator model is not configured. Set PI_BENCH_MODEL=provider/model in .env or the process environment. Use /analyze-dialog status to inspect configuration.",
         );
       }
       args.push("--model", evaluatorModel);
 
-      if (request.kind === "counterfactual" && !process.env.PI_REPLAY_MODEL?.trim()) {
-        const currentModel = ctx.model?.provider && ctx.model.id
-          ? ctx.model.provider + "/" + ctx.model.id
-          : "";
-        if (currentModel) args.push("--replay-model", currentModel);
+      if (config.values.PI_BENCH_PROVIDER?.trim()) {
+        args.push("--provider", config.values.PI_BENCH_PROVIDER.trim());
       }
-      if (process.env.PI_BENCH_PROVIDER?.trim()) args.push("--provider", process.env.PI_BENCH_PROVIDER.trim());
-      if (process.env.PI_BENCH_THINKING?.trim()) args.push("--thinking", process.env.PI_BENCH_THINKING.trim());
+      if (config.values.PI_BENCH_THINKING?.trim()) {
+        args.push("--thinking", config.values.PI_BENCH_THINKING.trim());
+      }
+
+      if (request.kind === "counterfactual") {
+        const replayModel = config.values.PI_REPLAY_MODEL?.trim();
+        if (replayModel) args.push("--replay-model", replayModel);
+        if (config.values.PI_REPLAY_PROVIDER?.trim()) args.push("--replay-provider", config.values.PI_REPLAY_PROVIDER.trim());
+        if (config.values.PI_REPLAY_THINKING?.trim()) args.push("--replay-thinking", config.values.PI_REPLAY_THINKING.trim());
+
+        if (!replayModel && !(ctx.model?.provider && ctx.model.id)) {
+          throw new Error(
+            "Counterfactual replay target model is unavailable. Set PI_REPLAY_MODEL=provider/model in .env or run from a session with an active model.",
+          );
+        }
+
+        if (!replayModel && ctx.model?.provider && ctx.model.id) {
+          args.push("--replay-model", ctx.model.provider + "/" + ctx.model.id);
+        }
+      }
 
       const result = await execFileAsync(process.execPath, args, {
         cwd: ctx.cwd,
@@ -2063,7 +2188,7 @@ export default function (pi: ExtensionAPI) {
     try {
       const request = parseAnalyzeDialogArgs(args);
       if (request.kind === "status") {
-        const status = getAnalyzeDialogStatus(ctx);
+        const status = await getAnalyzeDialogStatus(ctx);
         notify(ctx, request.json ? JSON.stringify(status) : formatAnalyzeDialogStatus(status), "info");
         return;
       }
