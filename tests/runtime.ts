@@ -34,6 +34,11 @@ function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false) 
 
   const ctx = {
     hasUI,
+    model: {
+      provider: "anthropic",
+      id: "current-session-model",
+      name: "Current Session Model",
+    },
     sessionManager: {
       getBranch: () => branch,
       getSessionFile: () => "runtime-test",
@@ -118,6 +123,29 @@ async function forget(h, params) {
 async function list(h, params = {}) {
   return tool(h, "checkpoint_list").execute("test", params, undefined, undefined, h.ctx);
 }
+
+const analyzeStatus = makeHarness([], "normal", true);
+const savedBenchModel = process.env.PI_BENCH_MODEL;
+const savedBenchProvider = process.env.PI_BENCH_PROVIDER;
+const savedReplayModel = process.env.PI_REPLAY_MODEL;
+const savedReplayProvider = process.env.PI_REPLAY_PROVIDER;
+delete process.env.PI_BENCH_MODEL;
+delete process.env.PI_BENCH_PROVIDER;
+delete process.env.PI_REPLAY_MODEL;
+delete process.env.PI_REPLAY_PROVIDER;
+await analyzeStatus.commands.get("analyze-dialog")?.handler("status", analyzeStatus.ctx);
+assert.match(analyzeStatus.notifications.at(-1).text, /fixed evaluator: NOT CONFIGURED/);
+assert.match(analyzeStatus.notifications.at(-1).text, /replay target: anthropic\/current-session-model/);
+await analyzeStatus.commands.get("analyze-dialog")?.handler("status --json", analyzeStatus.ctx);
+const analyzeStatusJson = JSON.parse(analyzeStatus.notifications.at(-1).text);
+assert.equal(analyzeStatusJson.evaluator.configured, false);
+assert.equal(analyzeStatusJson.replay.source, "current-session");
+assert.equal(analyzeStatusJson.currentSessionModel.provider, "anthropic");
+assert.equal(analyzeStatusJson.currentSessionModel.modelId, "current-session-model");
+if (savedBenchModel === undefined) delete process.env.PI_BENCH_MODEL; else process.env.PI_BENCH_MODEL = savedBenchModel;
+if (savedBenchProvider === undefined) delete process.env.PI_BENCH_PROVIDER; else process.env.PI_BENCH_PROVIDER = savedBenchProvider;
+if (savedReplayModel === undefined) delete process.env.PI_REPLAY_MODEL; else process.env.PI_REPLAY_MODEL = savedReplayModel;
+if (savedReplayProvider === undefined) delete process.env.PI_REPLAY_PROVIDER; else process.env.PI_REPLAY_PROVIDER = savedReplayProvider;
 
 const runtime = makeHarness([], "normal", true);
 await start(runtime);
