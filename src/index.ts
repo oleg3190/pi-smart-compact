@@ -2397,6 +2397,14 @@ export default function (pi: ExtensionAPI) {
       lines.push("mean delta (RIGHT - LEFT): " + formatDialogDelta(report.dialogueComparison.meanDelta));
     }
 
+    if (request.kind === "subagent") {
+      lines[0] = "subagent dialogue analysis";
+      const analyzed = isRecord(report.integration) ? report.integration.analyzedSessionFile : null;
+      if (typeof analyzed === "string" && analyzed.trim()) {
+        lines.push("session: " + analyzed);
+      }
+    }
+
     if (typeof evaluation?.summary === "string" && evaluation.summary.trim()) {
       lines.push(evaluation.summary.trim());
     }
