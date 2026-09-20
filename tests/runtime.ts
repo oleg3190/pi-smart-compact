@@ -34,6 +34,8 @@ function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false) 
 
   const ctx = {
     hasUI,
+    isIdle: () => true,
+    waitForIdle: async () => {},
     model: {
       provider: "anthropic",
       id: "current-session-model",
