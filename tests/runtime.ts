@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import smartCompact from "../src/index.ts";
 
 function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false, cwd = process.cwd()) {
