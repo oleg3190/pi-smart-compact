@@ -1883,7 +1883,7 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // Optional pi-subagents config.
     }
-    return [...new Set(roots.map(resolvePathname))];
+    return [...new Set(roots.map((root) => resolvePathname(root)))];
   }
 
   async function discoverChildSessions(ctx: ExtensionContext): Promise<DiscoveredChildSession[]> {
