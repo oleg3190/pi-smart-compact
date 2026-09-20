@@ -2413,13 +2413,28 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, request.json ? JSON.stringify(status) : formatAnalyzeDialogStatus(status), "info");
         return;
       }
+
+      if (request.kind === "subagents") {
+        const sessions = await discoverChildSessions(ctx);
+        notify(ctx, formatChildSessionList(sessions), "info");
+        return;
+      }
+
       let compared: { path: string; manager: SessionManager } | undefined;
+      let selectedSubagent: DiscoveredChildSession | undefined;
+      let dialogPath: string | undefined;
 
       if (request.kind === "compare") {
         compared = await resolveComparisonSession(request.target, ctx);
       }
 
-      const report = await invokeDialogAnalyzer(ctx, request, compared);
+      if (request.kind === "subagent") {
+        const sessions = await discoverChildSessions(ctx);
+        selectedSubagent = resolveChildSession(request.target, sessions);
+        dialogPath = selectedSubagent.path;
+      }
+
+      const report = await invokeDialogAnalyzer(ctx, request, compared, dialogPath);
       const integration = isRecord(report.integration) ? report.integration : {};
       report.integration = {
         ...integration,
@@ -2429,6 +2444,8 @@ export default function (pi: ExtensionAPI) {
         sessionFile: ctx.sessionManager.getSessionFile() ?? null,
         comparedSessionId: compared?.manager.getSessionId() ?? null,
         comparedSessionFile: compared?.path ?? null,
+        analyzedSessionId: selectedSubagent?.id ?? null,
+        analyzedSessionFile: selectedSubagent?.path ?? null,
       };
 
       const filePath = await persistDialogReport(ctx, report);
