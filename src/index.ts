@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.8.0 production
+ * smart-compact v3.9.1 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1674,7 +1674,8 @@ export default function (pi: ExtensionAPI) {
     | { kind: "current" }
     | { kind: "compact" }
     | { kind: "counterfactual" }
-    | { kind: "compare"; target: string };
+    | { kind: "compare"; target: string }
+    | { kind: "status"; json: boolean };
 
   function parseAnalyzeDialogArgs(raw: string): AnalyzeDialogRequest {
     const input = raw.trim();
@@ -1683,6 +1684,11 @@ export default function (pi: ExtensionAPI) {
     const firstSpace = input.indexOf(" ");
     const command = (firstSpace === -1 ? input : input.slice(0, firstSpace)).toLowerCase();
     const rest = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();
+
+    if (command === "status") {
+      if (!rest || rest === "--json") return { kind: "status", json: rest === "--json" };
+      throw new Error("Usage: /analyze-dialog status [--json]");
+    }
 
     if (command === "compact") {
       if (!rest) return { kind: "compact" };
@@ -1700,7 +1706,7 @@ export default function (pi: ExtensionAPI) {
       return { kind: "compare", target: rest };
     }
 
-    throw new Error("Usage: /analyze-dialog | compact [replay] | counterfactual | compare previous|<session.jsonl>");
+    throw new Error("Usage: /analyze-dialog [status [--json]] | compact [replay] | counterfactual | compare previous|<session.jsonl>");
   }
 
   function dialogAnalyzerScriptPath(): string {
@@ -1786,6 +1792,86 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function parseConfiguredModel(raw: string, providerOverride = ""): { provider: string; modelId: string } | null {
+    const requestedModel = raw.trim();
+    let provider = providerOverride.trim();
+    let modelId = requestedModel;
+    if (!provider && requestedModel.includes("/")) {
+      const slash = requestedModel.indexOf("/");
+      provider = requestedModel.slice(0, slash);
+      modelId = requestedModel.slice(slash + 1);
+    }
+    if (!provider || !modelId) return null;
+    return { provider, modelId };
+  }
+
+  function getAnalyzeDialogStatus(ctx: ExtensionContext): Record<string, unknown> {
+    const evaluator = parseConfiguredModel(
+      process.env.PI_BENCH_MODEL ?? "",
+      process.env.PI_BENCH_PROVIDER ?? "",
+    );
+    const replayOverride = parseConfiguredModel(
+      process.env.PI_REPLAY_MODEL ?? "",
+      process.env.PI_REPLAY_PROVIDER ?? "",
+    );
+    const currentModel =
+      ctx.model?.provider && ctx.model.id
+        ? { provider: ctx.model.provider, modelId: ctx.model.id }
+        : null;
+
+    const replayTarget = replayOverride
+      ? { ...replayOverride, source: "env" as const }
+      : currentModel
+        ? { ...currentModel, source: "current-session" as const }
+        : evaluator
+          ? { ...evaluator, source: "evaluator-fallback" as const }
+          : { provider: null, modelId: null, source: "unavailable" as const };
+
+    return {
+      schemaVersion: "1.0.0",
+      evaluator: {
+        configured: evaluator !== null,
+        provider: evaluator?.provider ?? null,
+        modelId: evaluator?.modelId ?? null,
+        source: evaluator ? "PI_BENCH_MODEL" : "missing",
+      },
+      replay: {
+        provider: replayTarget.provider,
+        modelId: replayTarget.modelId,
+        source: replayTarget.source,
+        thinking: process.env.PI_REPLAY_THINKING?.trim()
+          || process.env.PI_BENCH_THINKING?.trim()
+          || "off",
+      },
+      currentSessionModel: currentModel,
+      guidance: evaluator
+        ? "Fixed evaluator is configured. Counterfactual replay uses the current session model unless PI_REPLAY_MODEL/PI_REPLAY_PROVIDER overrides it."
+        : "Set PI_BENCH_MODEL=provider/model for semantic dialogue evaluation. Counterfactual replay can use the current session model after the evaluator is configured.",
+    };
+  }
+
+  function formatAnalyzeDialogStatus(status: Record<string, unknown>): string {
+    const evaluator = isRecord(status.evaluator) ? status.evaluator : {};
+    const replay = isRecord(status.replay) ? status.replay : {};
+    const current = isRecord(status.currentSessionModel) ? status.currentSessionModel : null;
+    const evaluatorConfigured = evaluator.configured === true;
+    const evaluatorName = evaluatorConfigured
+      ? String(evaluator.provider) + "/" + String(evaluator.modelId)
+      : "NOT CONFIGURED";
+    const replayName = replay.provider && replay.modelId
+      ? String(replay.provider) + "/" + String(replay.modelId)
+      : "UNAVAILABLE";
+    return [
+      "analyze-dialog configuration",
+      "fixed evaluator: " + evaluatorName,
+      "replay target: " + replayName + " (" + String(replay.source) + ")",
+      "replay thinking: " + String(replay.thinking),
+      "current session model: " + (current ? String(current.provider) + "/" + String(current.modelId) : "unavailable"),
+      evaluatorConfigured
+        ? "ready: /analyze-dialog, /analyze-dialog compact, /analyze-dialog counterfactual"
+        : "not ready: set PI_BENCH_MODEL=provider/model before running semantic analysis",
+    ].join("\n");
+  }
   async function invokeDialogAnalyzer(
     ctx: ExtensionContext,
     request: AnalyzeDialogRequest,
@@ -1825,9 +1911,18 @@ export default function (pi: ExtensionAPI) {
 
       const evaluatorModel = process.env.PI_BENCH_MODEL?.trim();
       if (!evaluatorModel) {
-        throw new Error("PI_BENCH_MODEL is not configured. Set the fixed evaluator as provider/model before using /analyze-dialog.");
+        throw new Error(
+          "Fixed evaluator model is not configured. Set PI_BENCH_MODEL=provider/model before using /analyze-dialog. Use /analyze-dialog status to inspect evaluator and replay configuration.",
+        );
       }
       args.push("--model", evaluatorModel);
+
+      if (request.kind === "counterfactual" && !process.env.PI_REPLAY_MODEL?.trim()) {
+        const currentModel = ctx.model?.provider && ctx.model.id
+          ? ctx.model.provider + "/" + ctx.model.id
+          : "";
+        if (currentModel) args.push("--replay-model", currentModel);
+      }
       if (process.env.PI_BENCH_PROVIDER?.trim()) args.push("--provider", process.env.PI_BENCH_PROVIDER.trim());
       if (process.env.PI_BENCH_THINKING?.trim()) args.push("--thinking", process.env.PI_BENCH_THINKING.trim());
 
@@ -1967,6 +2062,11 @@ export default function (pi: ExtensionAPI) {
   async function handleAnalyzeDialogCommand(args: string, ctx: ExtensionContext): Promise<void> {
     try {
       const request = parseAnalyzeDialogArgs(args);
+      if (request.kind === "status") {
+        const status = getAnalyzeDialogStatus(ctx);
+        notify(ctx, request.json ? JSON.stringify(status) : formatAnalyzeDialogStatus(status), "info");
+        return;
+      }
       let compared: { path: string; manager: SessionManager } | undefined;
 
       if (request.kind === "compare") {
@@ -2072,7 +2172,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("analyze-dialog", {
-    description: "Analyze the current dialogue, smart-compact context, or compare with another Pi session",
+    description: "Analyze the current dialogue, smart-compact context, compare sessions, or inspect analyzer model configuration",
     handler: async (args, ctx) => {
       if (!ctx.isIdle()) await ctx.waitForIdle();
       await handleAnalyzeDialogCommand(args, ctx);
