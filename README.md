@@ -1,5 +1,11 @@
 # pi-smart-compact
 
+## 3.9.2
+
+- `/analyze-dialog` now reads `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, `PI_BENCH_THINKING`, and replay settings from the current project's `.env` / `.env.local`.
+- Real process environment variables take precedence over project env files.
+- `/analyze-dialog status` reports where the evaluator/replay configuration came from.
+
 ## 3.9.1
 
 - Added `/analyze-dialog status` and `/analyze-dialog status --json` so evaluator/replay model configuration is visible before a paid LLM run.
@@ -103,4 +109,4 @@ The deterministic benchmark intentionally does not call an external LLM in CI. F
 npm run bench:dialog -- --dialog ./dialog.jsonl --model anthropic/claude-sonnet-4-5
 ```
 
-Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` pin the evaluator configuration for reproducible runs. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator and replay target. For counterfactual replay, the current Pi session model is used automatically unless `PI_REPLAY_MODEL` / `PI_REPLAY_PROVIDER` override it.
+Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` pin the evaluator configuration for reproducible runs. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator, replay target, and configuration source. Project `.env` / `.env.local` values are supported, while real process environment variables take precedence. For counterfactual replay, the current Pi session model is used automatically unless `PI_REPLAY_MODEL` / `PI_REPLAY_PROVIDER` override it.

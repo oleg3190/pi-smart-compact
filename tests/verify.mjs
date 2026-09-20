@@ -5,7 +5,7 @@ const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf
 const benchSource = fs.readFileSync(new URL('../bench/analyze-dialog.mjs', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.9.1');
+assert.equal(pkg.version, '3.9.2');
 assert.match(source, /const initialRuntimeEnabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
 assert.match(source, /let enabled = initialRuntimeEnabled;/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
@@ -29,6 +29,10 @@ assert.match(source, /pi\.registerCommand\("analyze-dialog"/);
 assert.match(source, /Usage: \/analyze-dialog \[status \[--json\]\] \| compact \[replay\] \| counterfactual/);
 assert.match(source, /PI_BENCH_MODEL/);
 assert.match(source, /getAnalyzeDialogStatus/);
+assert.match(source, /parseDotEnv/);
+assert.match(source, /loadAnalyzeDialogConfig/);
+assert.match(source, /\.env\.local/);
+assert.match(source, /in \.env or the process environment/);
 assert.match(source, /--replay-model/);
 assert.match(source, /Fixed evaluator model is not configured/);
 assert.match(source, /Usage: \/analyze-dialog status \[--json\]/);
