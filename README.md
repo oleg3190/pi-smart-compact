@@ -1,5 +1,12 @@
 # pi-smart-compact
 
+## 3.9.1
+
+- Added `/analyze-dialog status` and `/analyze-dialog status --json` so evaluator/replay model configuration is visible before a paid LLM run.
+- `PI_BENCH_MODEL` remains the fixed semantic evaluator and is required for reproducible dialogue-quality scoring.
+- Counterfactual replay now uses the current Pi session model by default; `PI_REPLAY_MODEL` / `PI_REPLAY_PROVIDER` still override the replay target.
+- Missing evaluator configuration now produces an actionable error pointing to `/analyze-dialog status`.
+
 ## 3.9.0
 
 - Added `/analyze-dialog counterfactual` (also `/analyze-dialog compact replay`) for paired baseline-vs-compact replay of the same final user task.
@@ -96,4 +103,4 @@ The deterministic benchmark intentionally does not call an external LLM in CI. F
 npm run bench:dialog -- --dialog ./dialog.jsonl --model anthropic/claude-sonnet-4-5
 ```
 
-Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` can pin the evaluator configuration for reproducible runs.
+Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` pin the evaluator configuration for reproducible runs. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator and replay target. For counterfactual replay, the current Pi session model is used automatically unless `PI_REPLAY_MODEL` / `PI_REPLAY_PROVIDER` override it.
