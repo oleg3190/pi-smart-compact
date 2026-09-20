@@ -2191,18 +2191,29 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionContext,
     request: AnalyzeDialogRequest,
     compared?: { path: string; manager: SessionManager },
+    dialogPath?: string,
   ): Promise<Record<string, unknown>> {
     const tempDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-dialog-"));
     const config = await loadAnalyzeDialogConfig(ctx.cwd);
 
     try {
-      const currentBranch = ctx.sessionManager.getBranch();
-      if (!branchHasMessage(currentBranch)) throw new Error("Current Pi session has no dialogue messages yet.");
-
       const primaryFile = join(tempDir, "primary.json");
-      await writeFile(primaryFile, JSON.stringify(currentBranch) + "\n", "utf8");
+      if (dialogPath) {
+        const selectedManager = SessionManager.open(dialogPath, ctx.sessionManager.getSessionDir());
+        if (!branchHasMessage(selectedManager.getBranch())) {
+          throw new Error("Selected subagent session has no dialogue messages.");
+        }
+      } else {
+        const currentBranch = ctx.sessionManager.getBranch();
+        if (!branchHasMessage(currentBranch)) throw new Error("Current Pi session has no dialogue messages yet.");
+        await writeFile(primaryFile, JSON.stringify(currentBranch) + "\n", "utf8");
+      }
 
-      const args = [dialogAnalyzerScriptPath(), "--dialog", primaryFile];
+      const args = [
+        dialogAnalyzerScriptPath(),
+        "--dialog",
+        dialogPath ?? primaryFile,
+      ];
 
       if (request.kind === "compact" || request.kind === "counterfactual") {
         const compact = getContextBlock().text;
@@ -2225,20 +2236,25 @@ export default function (pi: ExtensionAPI) {
         args.push("--compare-dialog", comparisonFile);
       }
 
-      const evaluatorModel = config.values.PI_BENCH_MODEL?.trim();
-      if (!evaluatorModel) {
+      const currentModel = ctx.model?.provider && ctx.model.id
+        ? { provider: ctx.model.provider, modelId: ctx.model.id }
+        : null;
+      const evaluator = currentModel ?? parseConfiguredModel(
+        config.values.PI_BENCH_MODEL ?? "",
+        config.values.PI_BENCH_PROVIDER ?? "",
+      );
+      if (!evaluator) {
         throw new Error(
-          "Fixed evaluator model is not configured. Set PI_BENCH_MODEL=provider/model in .env or the process environment. Use /analyze-dialog status to inspect configuration.",
+          "No analysis model is available. Start Pi with an active model or configure PI_BENCH_MODEL=provider/model as fallback.",
         );
       }
-      args.push("--model", evaluatorModel);
-
-      if (config.values.PI_BENCH_PROVIDER?.trim()) {
+      args.push("--model", evaluator.provider + "/" + evaluator.modelId);
+      if (!currentModel && config.values.PI_BENCH_PROVIDER?.trim()) {
         args.push("--provider", config.values.PI_BENCH_PROVIDER.trim());
       }
-      if (config.values.PI_BENCH_THINKING?.trim()) {
-        args.push("--thinking", config.values.PI_BENCH_THINKING.trim());
-      }
+
+      const evaluatorThinking = ctx.thinkingLevel || config.values.PI_BENCH_THINKING?.trim();
+      if (evaluatorThinking) args.push("--thinking", evaluatorThinking);
 
       if (request.kind === "counterfactual") {
         const replayModel = config.values.PI_REPLAY_MODEL?.trim();
@@ -2246,14 +2262,13 @@ export default function (pi: ExtensionAPI) {
         if (config.values.PI_REPLAY_PROVIDER?.trim()) args.push("--replay-provider", config.values.PI_REPLAY_PROVIDER.trim());
         if (config.values.PI_REPLAY_THINKING?.trim()) args.push("--replay-thinking", config.values.PI_REPLAY_THINKING.trim());
 
-        if (!replayModel && !(ctx.model?.provider && ctx.model.id)) {
+        if (!replayModel && currentModel) {
+          args.push("--replay-model", currentModel.provider + "/" + currentModel.modelId);
+          if (ctx.thinkingLevel) args.push("--replay-thinking", ctx.thinkingLevel);
+        } else if (!replayModel && !currentModel) {
           throw new Error(
-            "Counterfactual replay target model is unavailable. Set PI_REPLAY_MODEL=provider/model in .env or run from a session with an active model.",
+            "Counterfactual replay target model is unavailable. Start Pi with an active model or set PI_REPLAY_MODEL=provider/model as fallback.",
           );
-        }
-
-        if (!replayModel && ctx.model?.provider && ctx.model.id) {
-          args.push("--replay-model", ctx.model.provider + "/" + ctx.model.id);
         }
       }
 
