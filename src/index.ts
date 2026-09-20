@@ -5,9 +5,9 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join, resolve as resolvePathname } from "node:path";
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve as resolvePathname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Type } from "typebox";
@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.9.2 production
+ * smart-compact v3.10.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1675,6 +1675,8 @@ export default function (pi: ExtensionAPI) {
     | { kind: "compact" }
     | { kind: "counterfactual" }
     | { kind: "compare"; target: string }
+    | { kind: "subagents" }
+    | { kind: "subagent"; target: string }
     | { kind: "status"; json: boolean };
 
   function parseAnalyzeDialogArgs(raw: string): AnalyzeDialogRequest {
@@ -1688,6 +1690,16 @@ export default function (pi: ExtensionAPI) {
     if (command === "status") {
       if (!rest || rest === "--json") return { kind: "status", json: rest === "--json" };
       throw new Error("Usage: /analyze-dialog status [--json]");
+    }
+
+    if (command === "subagents") {
+      if (!rest) return { kind: "subagents" };
+      return { kind: "subagent", target: rest };
+    }
+
+    if (command === "subagent") {
+      if (!rest) throw new Error("Usage: /analyze-dialog subagent <id|index|path>");
+      return { kind: "subagent", target: rest };
     }
 
     if (command === "compact") {
@@ -1706,7 +1718,7 @@ export default function (pi: ExtensionAPI) {
       return { kind: "compare", target: rest };
     }
 
-    throw new Error("Usage: /analyze-dialog [status [--json]] | compact [replay] | counterfactual | compare previous|<session.jsonl>");
+    throw new Error("Usage: /analyze-dialog [status [--json]] | subagents [<target>] | subagent <id|index|path> | compact [replay] | counterfactual | compare previous|<session.jsonl>");
   }
 
   function dialogAnalyzerScriptPath(): string {
