@@ -2109,53 +2109,58 @@ export default function (pi: ExtensionAPI) {
 
   async function getAnalyzeDialogStatus(ctx: ExtensionContext): Promise<Record<string, unknown>> {
     const config = await loadAnalyzeDialogConfig(ctx.cwd);
-    const evaluator = parseConfiguredModel(
-      config.values.PI_BENCH_MODEL ?? "",
-      config.values.PI_BENCH_PROVIDER ?? "",
-    );
-    const replayOverride = parseConfiguredModel(
-      config.values.PI_REPLAY_MODEL ?? "",
-      config.values.PI_REPLAY_PROVIDER ?? "",
-    );
     const currentModel =
       ctx.model?.provider && ctx.model.id
         ? { provider: ctx.model.provider, modelId: ctx.model.id }
         : null;
+    const configuredFallback = parseConfiguredModel(
+      config.values.PI_BENCH_MODEL ?? "",
+      config.values.PI_BENCH_PROVIDER ?? "",
+    );
+    const evaluator = currentModel ?? configuredFallback;
+    const evaluatorSource = currentModel ? "current-session" : (config.sources.PI_BENCH_MODEL ?? "missing");
+    const replayOverride = parseConfiguredModel(
+      config.values.PI_REPLAY_MODEL ?? "",
+      config.values.PI_REPLAY_PROVIDER ?? "",
+    );
 
     const replayTarget = replayOverride
-      ? { ...replayOverride, source: config.sources.PI_REPLAY_MODEL === "missing" ? "env" as const : config.sources.PI_REPLAY_MODEL }
+      ? { ...replayOverride, source: config.sources.PI_REPLAY_MODEL === "missing" ? "config" as const : config.sources.PI_REPLAY_MODEL }
       : currentModel
         ? { ...currentModel, source: "current-session" as const }
         : evaluator
           ? { ...evaluator, source: "evaluator-fallback" as const }
           : { provider: null, modelId: null, source: "unavailable" as const };
 
+    const evaluatorThinking = ctx.thinkingLevel
+      || config.values.PI_BENCH_THINKING
+      || "off";
+
     return {
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       evaluator: {
         configured: evaluator !== null,
         provider: evaluator?.provider ?? null,
         modelId: evaluator?.modelId ?? null,
-        source: config.sources.PI_BENCH_MODEL,
+        source: evaluatorSource,
+        thinking: evaluatorThinking,
       },
       replay: {
         provider: replayTarget.provider,
         modelId: replayTarget.modelId,
         source: replayTarget.source,
         thinking: config.values.PI_REPLAY_THINKING
+          || ctx.thinkingLevel
           || config.values.PI_BENCH_THINKING
           || "off",
-        thinkingSource: config.values.PI_REPLAY_THINKING
-          ? config.sources.PI_REPLAY_THINKING
-          : config.values.PI_BENCH_THINKING
-            ? config.sources.PI_BENCH_THINKING
-            : "missing",
       },
       currentSessionModel: currentModel,
       configFiles: [".env", ".env.local"],
-      guidance: evaluator
-        ? "Fixed evaluator is configured. Counterfactual replay uses the current session model unless PI_REPLAY_MODEL/PI_REPLAY_PROVIDER overrides it."
-        : "Set PI_BENCH_MODEL=provider/model in the project .env or process environment before running semantic analysis.",
+      guidance: currentModel
+        ? "Analysis uses the current chat model by default. PI_BENCH_MODEL is only a fallback when the current chat has no active model."
+        : configuredFallback
+          ? "No active chat model is exposed; analysis is using the configured PI_BENCH_MODEL fallback."
+          : "No analysis model is available. Start Pi with an active model or configure PI_BENCH_MODEL=provider/model as a fallback.",
     };
   }
 
@@ -2172,13 +2177,13 @@ export default function (pi: ExtensionAPI) {
       : "UNAVAILABLE";
     return [
       "analyze-dialog configuration",
-      "fixed evaluator: " + evaluatorName + " (" + String(evaluator.source) + ")",
+      "analysis model: " + evaluatorName + " (" + String(evaluator.source) + ")",
       "replay target: " + replayName + " (" + String(replay.source) + ")",
       "replay thinking: " + String(replay.thinking) + " (" + String(replay.thinkingSource) + ")",
       "current session model: " + (current ? String(current.provider) + "/" + String(current.modelId) : "unavailable"),
       evaluatorConfigured
-        ? "ready: /analyze-dialog, /analyze-dialog compact, /analyze-dialog counterfactual"
-        : "not ready: set PI_BENCH_MODEL=provider/model in .env or the process environment",
+        ? "ready: current chat model is used for analysis"
+        : "not ready: start Pi with an active model or set PI_BENCH_MODEL=provider/model as fallback",
     ].join("\n");
   }
 
