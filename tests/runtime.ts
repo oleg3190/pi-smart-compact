@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import smartCompact from "../src/index.ts";
 
-function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false, cwd = process.cwd()) {
+function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false, cwd = process.cwd(), model = {
+  provider: "anthropic",
+  id: "current-session-model",
+  name: "Current Session Model",
+}, sessionFile = join(cwd, "parent.jsonl"), sessionDir = cwd) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
@@ -40,14 +44,11 @@ function makeHarness(initialEntries = [], appendMode = "normal", hasUI = false, 
     cwd,
     isIdle: () => true,
     waitForIdle: async () => {},
-    model: {
-      provider: "anthropic",
-      id: "current-session-model",
-      name: "Current Session Model",
-    },
+    model,
     sessionManager: {
       getBranch: () => branch,
-      getSessionFile: () => "runtime-test",
+      getSessionFile: () => sessionFile,
+      getSessionDir: () => sessionDir,
     },
     ui: {
       setStatus(_id, text) {
@@ -141,10 +142,10 @@ try {
     "PI_BENCH_MODEL=anthropic/from-project-dotenv\nPI_BENCH_THINKING=low\n",
     "utf8",
   );
-  const envHarness = makeHarness([], "normal", true, envDir);
+  const envHarness = makeHarness([], "normal", true, envDir, null);
   await envHarness.commands.get("analyze-dialog")?.handler("status", envHarness.ctx);
-  assert.match(envHarness.notifications.at(-1).text, /fixed evaluator: anthropic\/from-project-dotenv \(\.env\)/);
-  assert.match(envHarness.notifications.at(-1).text, /replay thinking: low \(\.env\)/);
+  assert.match(envHarness.notifications.at(-1).text, /analysis model: anthropic\/from-project-dotenv \(\.env\)/);
+  assert.match(envHarness.notifications.at(-1).text, /replay thinking: low/);
   await envHarness.commands.get("analyze-dialog")?.handler("status --json", envHarness.ctx);
   const envStatus = JSON.parse(envHarness.notifications.at(-1).text);
   assert.equal(envStatus.evaluator.configured, true);
@@ -166,18 +167,74 @@ delete process.env.PI_BENCH_PROVIDER;
 delete process.env.PI_REPLAY_MODEL;
 delete process.env.PI_REPLAY_PROVIDER;
 await analyzeStatus.commands.get("analyze-dialog")?.handler("status", analyzeStatus.ctx);
-assert.match(analyzeStatus.notifications.at(-1).text, /fixed evaluator: NOT CONFIGURED/);
+assert.match(analyzeStatus.notifications.at(-1).text, /analysis model: anthropic\/current-session-model \(current-session\)/);
 assert.match(analyzeStatus.notifications.at(-1).text, /replay target: anthropic\/current-session-model/);
 await analyzeStatus.commands.get("analyze-dialog")?.handler("status --json", analyzeStatus.ctx);
 const analyzeStatusJson = JSON.parse(analyzeStatus.notifications.at(-1).text);
-assert.equal(analyzeStatusJson.evaluator.configured, false);
+assert.equal(analyzeStatusJson.evaluator.configured, true);
 assert.equal(analyzeStatusJson.replay.source, "current-session");
 assert.equal(analyzeStatusJson.currentSessionModel.provider, "anthropic");
 assert.equal(analyzeStatusJson.currentSessionModel.modelId, "current-session-model");
+assert.equal(analyzeStatusJson.evaluator.source, "current-session");
 if (savedBenchModel === undefined) delete process.env.PI_BENCH_MODEL; else process.env.PI_BENCH_MODEL = savedBenchModel;
 if (savedBenchProvider === undefined) delete process.env.PI_BENCH_PROVIDER; else process.env.PI_BENCH_PROVIDER = savedBenchProvider;
 if (savedReplayModel === undefined) delete process.env.PI_REPLAY_MODEL; else process.env.PI_REPLAY_MODEL = savedReplayModel;
 if (savedReplayProvider === undefined) delete process.env.PI_REPLAY_PROVIDER; else process.env.PI_REPLAY_PROVIDER = savedReplayProvider;
+
+const subagentDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-subagents-test-"));
+const parentSessionFile = join(subagentDir, "parent.jsonl");
+const childSessionFile = join(subagentDir, "child.jsonl");
+const unrelatedSessionFile = join(subagentDir, "unrelated.jsonl");
+try {
+  await writeFile(parentSessionFile, JSON.stringify({
+    type: "session",
+    version: 3,
+    id: "parent-session",
+    timestamp: "2026-09-20T00:00:00.000Z",
+    cwd: subagentDir,
+  }) + "\n", "utf8");
+  await writeFile(childSessionFile, [
+    JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "child-session",
+      timestamp: "2026-09-20T00:01:00.000Z",
+      cwd: subagentDir,
+      parentSession: parentSessionFile,
+    }),
+    JSON.stringify({
+      type: "message",
+      id: "child-user",
+      parentId: null,
+      timestamp: "2026-09-20T00:01:01.000Z",
+      message: { role: "user", content: "Child task" },
+    }),
+  ].join("\n") + "\n", "utf8");
+  await writeFile(unrelatedSessionFile, JSON.stringify({
+    type: "session",
+    version: 3,
+    id: "unrelated-session",
+    timestamp: "2026-09-20T00:02:00.000Z",
+    cwd: subagentDir,
+  }) + "\n", "utf8");
+
+  const subagentHarness = makeHarness(
+    [],
+    "normal",
+    true,
+    subagentDir,
+    { provider: "anthropic", id: "current-session-model", name: "Current Session Model" },
+    parentSessionFile,
+    subagentDir,
+  );
+  await subagentHarness.commands.get("analyze-dialog")?.handler("subagents", subagentHarness.ctx);
+  assert.match(subagentHarness.notifications.at(-1).text, /child-session/);
+  assert.doesNotMatch(subagentHarness.notifications.at(-1).text, /unrelated-session/);
+  await subagentHarness.commands.get("analyze-dialog")?.handler("subagent child-session", subagentHarness.ctx);
+  assert.match(subagentHarness.notifications.at(-1).text, /Current Pi session has no dialogue messages yet\.|dialogue analysis failed:/);
+} finally {
+  await rm(subagentDir, { recursive: true, force: true });
+}
 
 const runtime = makeHarness([], "normal", true);
 await start(runtime);

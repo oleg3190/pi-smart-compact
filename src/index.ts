@@ -5,9 +5,9 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join, resolve as resolvePathname } from "node:path";
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve as resolvePathname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Type } from "typebox";
@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.9.2 production
+ * smart-compact v3.10.0 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1675,6 +1675,8 @@ export default function (pi: ExtensionAPI) {
     | { kind: "compact" }
     | { kind: "counterfactual" }
     | { kind: "compare"; target: string }
+    | { kind: "subagents" }
+    | { kind: "subagent"; target: string }
     | { kind: "status"; json: boolean };
 
   function parseAnalyzeDialogArgs(raw: string): AnalyzeDialogRequest {
@@ -1688,6 +1690,16 @@ export default function (pi: ExtensionAPI) {
     if (command === "status") {
       if (!rest || rest === "--json") return { kind: "status", json: rest === "--json" };
       throw new Error("Usage: /analyze-dialog status [--json]");
+    }
+
+    if (command === "subagents") {
+      if (!rest) return { kind: "subagents" };
+      return { kind: "subagent", target: rest };
+    }
+
+    if (command === "subagent") {
+      if (!rest) throw new Error("Usage: /analyze-dialog subagent <id|index|path>");
+      return { kind: "subagent", target: rest };
     }
 
     if (command === "compact") {
@@ -1706,7 +1718,7 @@ export default function (pi: ExtensionAPI) {
       return { kind: "compare", target: rest };
     }
 
-    throw new Error("Usage: /analyze-dialog [status [--json]] | compact [replay] | counterfactual | compare previous|<session.jsonl>");
+    throw new Error("Usage: /analyze-dialog [status [--json]] | subagents [<target>] | subagent <id|index|path> | compact [replay] | counterfactual | compare previous|<session.jsonl>");
   }
 
   function dialogAnalyzerScriptPath(): string {
@@ -1790,6 +1802,195 @@ export default function (pi: ExtensionAPI) {
       if (!branchHasMessage(manager.getBranch())) throw new Error("The selected session has no dialogue messages.");
       return { path: matchPath, manager };
     }
+  }
+
+  interface DiscoveredChildSession {
+    path: string;
+    id: string;
+    cwd: string;
+    parentSession: string | null;
+    createdAt: string;
+    modifiedAt: string;
+  }
+
+  function normalizeSessionLink(value: string, baseDir: string): string {
+    return resolvePathname(baseDir, value);
+  }
+
+  async function readSessionHeader(filePath: string): Promise<Record<string, unknown> | null> {
+    let handle;
+    try {
+      handle = await open(filePath, "r");
+      const buffer = Buffer.alloc(128 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+      const firstLine = buffer.subarray(0, newline >= 0 ? newline : bytesRead).toString("utf8").trim();
+      if (!firstLine) return null;
+      const parsed: unknown = JSON.parse(firstLine);
+      if (!isRecord(parsed) || parsed.type !== "session" || typeof parsed.id !== "string") return null;
+      return parsed;
+    } catch {
+      return null;
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
+  async function collectSessionFiles(root: string, maxDepth = 5, limit = 2000): Promise<string[]> {
+    const results: string[] = [];
+    const seen = new Set<string>();
+
+    async function walk(dir: string, depth: number): Promise<void> {
+      if (results.length >= limit || depth < 0) return;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (results.length >= limit) break;
+        const path = join(dir, entry.name);
+        if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+          const normalized = resolvePathname(path);
+          if (!seen.has(normalized)) {
+            seen.add(normalized);
+            results.push(normalized);
+          }
+        } else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          await walk(path, depth - 1);
+        }
+      }
+    }
+
+    await walk(root, maxDepth);
+    return results;
+  }
+
+  async function configuredSubagentSessionRoots(): Promise<string[]> {
+    const roots = [join(homedir(), ".pi", "agent", "sessions", "subagent")];
+    try {
+      const configPath = join(homedir(), ".pi", "agent", "extensions", "subagent", "config.json");
+      const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
+      if (isRecord(parsed) && typeof parsed.defaultSessionDir === "string" && parsed.defaultSessionDir.trim()) {
+        const configured = parsed.defaultSessionDir.trim();
+        roots.push(
+          configured.startsWith("~/")
+            ? join(homedir(), configured.slice(2))
+            : resolvePathname(process.cwd(), configured),
+        );
+      }
+    } catch {
+      // Optional pi-subagents config.
+    }
+    return [...new Set(roots.map((root) => resolvePathname(root)))];
+  }
+
+  async function discoverChildSessions(ctx: ExtensionContext): Promise<DiscoveredChildSession[]> {
+    const currentSessionFile = ctx.sessionManager.getSessionFile();
+    if (!currentSessionFile) return [];
+
+    const currentPath = resolvePathname(currentSessionFile);
+    const currentSessionDir = resolvePathname(ctx.sessionManager.getSessionDir());
+    const currentStem = basename(currentPath).replace(/\.jsonl$/i, "");
+    const derivedRoot = join(currentSessionDir, currentStem);
+
+    const roots = [currentSessionDir, derivedRoot, ...(await configuredSubagentSessionRoots())];
+    const files = [...new Set(
+      (await Promise.all(roots.map((root) => collectSessionFiles(root)))).flat(),
+    )];
+
+    const metadata = new Map<string, DiscoveredChildSession>();
+    const parentByPath = new Map<string, string | null>();
+
+    for (const filePath of files) {
+      if (filePath === currentPath) continue;
+      const header = await readSessionHeader(filePath);
+      if (!header) continue;
+
+      const parentRaw = typeof header.parentSession === "string" ? header.parentSession : null;
+      const parent = parentRaw ? normalizeSessionLink(parentRaw, dirname(filePath)) : null;
+      const cwd = typeof header.cwd === "string" ? header.cwd : "";
+      const createdAt = typeof header.timestamp === "string" ? header.timestamp : "";
+      let modifiedAt = createdAt;
+      try {
+        modifiedAt = (await stat(filePath)).mtime.toISOString();
+      } catch {
+        // Keep header timestamp.
+      }
+
+      const session: DiscoveredChildSession = {
+        path: filePath,
+        id: header.id as string,
+        cwd,
+        parentSession: parent,
+        createdAt,
+        modifiedAt,
+      };
+      metadata.set(filePath, session);
+      parentByPath.set(filePath, parent);
+    }
+
+    const derivedHint = derivedRoot + "/";
+    const isDescendant = (path: string): boolean => {
+      if (path.startsWith(derivedHint)) return true;
+
+      const seen = new Set<string>();
+      let cursor: string | null = path;
+      while (cursor && cursor !== currentPath && !seen.has(cursor)) {
+        seen.add(cursor);
+        cursor = parentByPath.get(cursor) ?? null;
+      }
+      return cursor === currentPath;
+    };
+
+    return [...metadata.values()]
+      .filter((session) => isDescendant(session.path))
+      .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  }
+
+  function formatChildSessionList(sessions: readonly DiscoveredChildSession[]): string {
+    if (sessions.length === 0) {
+      return "No child/subagent sessions linked to the current Pi chat were found.";
+    }
+
+    return [
+      "subagent sessions:",
+      ...sessions.map((session, index) => {
+        const location = relative(process.cwd(), session.path) || session.path;
+        const modified = session.modifiedAt || session.createdAt || "unknown";
+        return String(index + 1).padStart(2, " ") +
+          ". " + session.id +
+          " · " + modified +
+          " · " + location;
+      }),
+      "",
+      "Analyze one with: /analyze-dialog subagent <index|id|path>",
+    ].join("\n");
+  }
+
+  function resolveChildSession(
+    target: string,
+    sessions: readonly DiscoveredChildSession[],
+  ): DiscoveredChildSession {
+    const value = target.trim();
+    const numeric = Number(value);
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= sessions.length) {
+      return sessions[numeric - 1];
+    }
+
+    const exactPath = resolvePathname(process.cwd(), value);
+    const exact = sessions.find((session) => session.path === exactPath);
+    if (exact) return exact;
+
+    const exactId = sessions.find((session) => session.id === value);
+    if (exactId) return exactId;
+
+    const prefix = sessions.filter((session) => session.id.startsWith(value));
+    if (prefix.length === 1) return prefix[0];
+    if (prefix.length > 1) throw new Error("Subagent session id prefix is ambiguous: " + value);
+
+    throw new Error("Subagent session not found: " + value);
   }
 
   function parseConfiguredModel(raw: string, providerOverride = ""): { provider: string; modelId: string } | null {
@@ -1908,53 +2109,65 @@ export default function (pi: ExtensionAPI) {
 
   async function getAnalyzeDialogStatus(ctx: ExtensionContext): Promise<Record<string, unknown>> {
     const config = await loadAnalyzeDialogConfig(ctx.cwd);
-    const evaluator = parseConfiguredModel(
-      config.values.PI_BENCH_MODEL ?? "",
-      config.values.PI_BENCH_PROVIDER ?? "",
-    );
-    const replayOverride = parseConfiguredModel(
-      config.values.PI_REPLAY_MODEL ?? "",
-      config.values.PI_REPLAY_PROVIDER ?? "",
-    );
     const currentModel =
       ctx.model?.provider && ctx.model.id
         ? { provider: ctx.model.provider, modelId: ctx.model.id }
         : null;
+    const configuredFallback = parseConfiguredModel(
+      config.values.PI_BENCH_MODEL ?? "",
+      config.values.PI_BENCH_PROVIDER ?? "",
+    );
+    const evaluator = currentModel ?? configuredFallback;
+    const evaluatorSource = currentModel ? "current-session" : (config.sources.PI_BENCH_MODEL ?? "missing");
+    const replayOverride = parseConfiguredModel(
+      config.values.PI_REPLAY_MODEL ?? "",
+      config.values.PI_REPLAY_PROVIDER ?? "",
+    );
 
     const replayTarget = replayOverride
-      ? { ...replayOverride, source: config.sources.PI_REPLAY_MODEL === "missing" ? "env" as const : config.sources.PI_REPLAY_MODEL }
+      ? { ...replayOverride, source: config.sources.PI_REPLAY_MODEL === "missing" ? "config" as const : config.sources.PI_REPLAY_MODEL }
       : currentModel
         ? { ...currentModel, source: "current-session" as const }
         : evaluator
           ? { ...evaluator, source: "evaluator-fallback" as const }
           : { provider: null, modelId: null, source: "unavailable" as const };
 
+    const evaluatorThinking = ctx.thinkingLevel
+      || config.values.PI_BENCH_THINKING
+      || "off";
+
     return {
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       evaluator: {
         configured: evaluator !== null,
         provider: evaluator?.provider ?? null,
         modelId: evaluator?.modelId ?? null,
-        source: config.sources.PI_BENCH_MODEL,
+        source: evaluatorSource,
+        thinking: evaluatorThinking,
       },
       replay: {
         provider: replayTarget.provider,
         modelId: replayTarget.modelId,
         source: replayTarget.source,
         thinking: config.values.PI_REPLAY_THINKING
+          || ctx.thinkingLevel
           || config.values.PI_BENCH_THINKING
           || "off",
         thinkingSource: config.values.PI_REPLAY_THINKING
           ? config.sources.PI_REPLAY_THINKING
-          : config.values.PI_BENCH_THINKING
-            ? config.sources.PI_BENCH_THINKING
-            : "missing",
+          : ctx.thinkingLevel
+            ? "current-session"
+            : config.values.PI_BENCH_THINKING
+              ? config.sources.PI_BENCH_THINKING
+              : "missing",
       },
       currentSessionModel: currentModel,
       configFiles: [".env", ".env.local"],
-      guidance: evaluator
-        ? "Fixed evaluator is configured. Counterfactual replay uses the current session model unless PI_REPLAY_MODEL/PI_REPLAY_PROVIDER overrides it."
-        : "Set PI_BENCH_MODEL=provider/model in the project .env or process environment before running semantic analysis.",
+      guidance: currentModel
+        ? "Analysis uses the current chat model by default. PI_BENCH_MODEL is only a fallback when the current chat has no active model."
+        : configuredFallback
+          ? "No active chat model is exposed; analysis is using the configured PI_BENCH_MODEL fallback."
+          : "No analysis model is available. Start Pi with an active model or configure PI_BENCH_MODEL=provider/model as a fallback.",
     };
   }
 
@@ -1971,13 +2184,13 @@ export default function (pi: ExtensionAPI) {
       : "UNAVAILABLE";
     return [
       "analyze-dialog configuration",
-      "fixed evaluator: " + evaluatorName + " (" + String(evaluator.source) + ")",
+      "analysis model: " + evaluatorName + " (" + String(evaluator.source) + ")",
       "replay target: " + replayName + " (" + String(replay.source) + ")",
       "replay thinking: " + String(replay.thinking) + " (" + String(replay.thinkingSource) + ")",
       "current session model: " + (current ? String(current.provider) + "/" + String(current.modelId) : "unavailable"),
       evaluatorConfigured
-        ? "ready: /analyze-dialog, /analyze-dialog compact, /analyze-dialog counterfactual"
-        : "not ready: set PI_BENCH_MODEL=provider/model in .env or the process environment",
+        ? "ready: current chat model is used for analysis"
+        : "not ready: start Pi with an active model or set PI_BENCH_MODEL=provider/model as fallback",
     ].join("\n");
   }
 
@@ -1985,18 +2198,29 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionContext,
     request: AnalyzeDialogRequest,
     compared?: { path: string; manager: SessionManager },
+    dialogPath?: string,
   ): Promise<Record<string, unknown>> {
     const tempDir = await mkdtemp(join(tmpdir(), "pi-smart-compact-dialog-"));
     const config = await loadAnalyzeDialogConfig(ctx.cwd);
 
     try {
-      const currentBranch = ctx.sessionManager.getBranch();
-      if (!branchHasMessage(currentBranch)) throw new Error("Current Pi session has no dialogue messages yet.");
-
       const primaryFile = join(tempDir, "primary.json");
-      await writeFile(primaryFile, JSON.stringify(currentBranch) + "\n", "utf8");
+      if (dialogPath) {
+        const selectedManager = SessionManager.open(dialogPath, dirname(dialogPath));
+        if (!branchHasMessage(selectedManager.getBranch())) {
+          throw new Error("Selected subagent session has no dialogue messages.");
+        }
+      } else {
+        const currentBranch = ctx.sessionManager.getBranch();
+        if (!branchHasMessage(currentBranch)) throw new Error("Current Pi session has no dialogue messages yet.");
+        await writeFile(primaryFile, JSON.stringify(currentBranch) + "\n", "utf8");
+      }
 
-      const args = [dialogAnalyzerScriptPath(), "--dialog", primaryFile];
+      const args = [
+        dialogAnalyzerScriptPath(),
+        "--dialog",
+        dialogPath ?? primaryFile,
+      ];
 
       if (request.kind === "compact" || request.kind === "counterfactual") {
         const compact = getContextBlock().text;
@@ -2019,20 +2243,25 @@ export default function (pi: ExtensionAPI) {
         args.push("--compare-dialog", comparisonFile);
       }
 
-      const evaluatorModel = config.values.PI_BENCH_MODEL?.trim();
-      if (!evaluatorModel) {
+      const currentModel = ctx.model?.provider && ctx.model.id
+        ? { provider: ctx.model.provider, modelId: ctx.model.id }
+        : null;
+      const evaluator = currentModel ?? parseConfiguredModel(
+        config.values.PI_BENCH_MODEL ?? "",
+        config.values.PI_BENCH_PROVIDER ?? "",
+      );
+      if (!evaluator) {
         throw new Error(
-          "Fixed evaluator model is not configured. Set PI_BENCH_MODEL=provider/model in .env or the process environment. Use /analyze-dialog status to inspect configuration.",
+          "No analysis model is available. Start Pi with an active model or configure PI_BENCH_MODEL=provider/model as fallback.",
         );
       }
-      args.push("--model", evaluatorModel);
-
-      if (config.values.PI_BENCH_PROVIDER?.trim()) {
+      args.push("--model", evaluator.provider + "/" + evaluator.modelId);
+      if (!currentModel && config.values.PI_BENCH_PROVIDER?.trim()) {
         args.push("--provider", config.values.PI_BENCH_PROVIDER.trim());
       }
-      if (config.values.PI_BENCH_THINKING?.trim()) {
-        args.push("--thinking", config.values.PI_BENCH_THINKING.trim());
-      }
+
+      const evaluatorThinking = ctx.thinkingLevel || config.values.PI_BENCH_THINKING?.trim();
+      if (evaluatorThinking) args.push("--thinking", evaluatorThinking);
 
       if (request.kind === "counterfactual") {
         const replayModel = config.values.PI_REPLAY_MODEL?.trim();
@@ -2040,14 +2269,13 @@ export default function (pi: ExtensionAPI) {
         if (config.values.PI_REPLAY_PROVIDER?.trim()) args.push("--replay-provider", config.values.PI_REPLAY_PROVIDER.trim());
         if (config.values.PI_REPLAY_THINKING?.trim()) args.push("--replay-thinking", config.values.PI_REPLAY_THINKING.trim());
 
-        if (!replayModel && !(ctx.model?.provider && ctx.model.id)) {
+        if (!replayModel && currentModel) {
+          args.push("--replay-model", currentModel.provider + "/" + currentModel.modelId);
+          if (ctx.thinkingLevel) args.push("--replay-thinking", ctx.thinkingLevel);
+        } else if (!replayModel && !currentModel) {
           throw new Error(
-            "Counterfactual replay target model is unavailable. Set PI_REPLAY_MODEL=provider/model in .env or run from a session with an active model.",
+            "Counterfactual replay target model is unavailable. Start Pi with an active model or set PI_REPLAY_MODEL=provider/model as fallback.",
           );
-        }
-
-        if (!replayModel && ctx.model?.provider && ctx.model.id) {
-          args.push("--replay-model", ctx.model.provider + "/" + ctx.model.id);
         }
       }
 
@@ -2176,6 +2404,14 @@ export default function (pi: ExtensionAPI) {
       lines.push("mean delta (RIGHT - LEFT): " + formatDialogDelta(report.dialogueComparison.meanDelta));
     }
 
+    if (request.kind === "subagent") {
+      lines[0] = "subagent dialogue analysis";
+      const analyzed = isRecord(report.integration) ? report.integration.analyzedSessionFile : null;
+      if (typeof analyzed === "string" && analyzed.trim()) {
+        lines.push("session: " + analyzed);
+      }
+    }
+
     if (typeof evaluation?.summary === "string" && evaluation.summary.trim()) {
       lines.push(evaluation.summary.trim());
     }
@@ -2192,13 +2428,28 @@ export default function (pi: ExtensionAPI) {
         notify(ctx, request.json ? JSON.stringify(status) : formatAnalyzeDialogStatus(status), "info");
         return;
       }
+
+      if (request.kind === "subagents") {
+        const sessions = await discoverChildSessions(ctx);
+        notify(ctx, formatChildSessionList(sessions), "info");
+        return;
+      }
+
       let compared: { path: string; manager: SessionManager } | undefined;
+      let selectedSubagent: DiscoveredChildSession | undefined;
+      let dialogPath: string | undefined;
 
       if (request.kind === "compare") {
         compared = await resolveComparisonSession(request.target, ctx);
       }
 
-      const report = await invokeDialogAnalyzer(ctx, request, compared);
+      if (request.kind === "subagent") {
+        const sessions = await discoverChildSessions(ctx);
+        selectedSubagent = resolveChildSession(request.target, sessions);
+        dialogPath = selectedSubagent.path;
+      }
+
+      const report = await invokeDialogAnalyzer(ctx, request, compared, dialogPath);
       const integration = isRecord(report.integration) ? report.integration : {};
       report.integration = {
         ...integration,
@@ -2208,6 +2459,8 @@ export default function (pi: ExtensionAPI) {
         sessionFile: ctx.sessionManager.getSessionFile() ?? null,
         comparedSessionId: compared?.manager.getSessionId() ?? null,
         comparedSessionFile: compared?.path ?? null,
+        analyzedSessionId: selectedSubagent?.id ?? null,
+        analyzedSessionFile: selectedSubagent?.path ?? null,
       };
 
       const filePath = await persistDialogReport(ctx, report);
