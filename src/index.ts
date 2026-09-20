@@ -16,7 +16,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 const execFileAsync = promisify(execFile);
 
 /**
- * smart-compact v3.10.0 production
+ * smart-compact v3.10.1 production
  *
  * Production-hardened branch-scoped pinned memory with:
  * - strict validation symmetry
@@ -1670,8 +1670,43 @@ export default function (pi: ExtensionAPI) {
     return { hot, priority, priorityExplicit };
   }
 
+  function renderCommandHelp(): string {
+    return [
+      "pi-smart-compact — справка по командам",
+      "",
+      "/smart-compact — управление smart-compact и runtime-диагностика.",
+      "  /smart-compact on — включить smart-compact для текущей сессии.",
+      "  /smart-compact off — выключить smart-compact для текущей сессии.",
+      "  /smart-compact status — показать runtime-диагностику: активацию, применение контекста и расход контекста.",
+      "  /smart-compact status --json — вывести ту же диагностику в JSON.",
+      "  /smart-compact help — показать эту справку.",
+      "",
+      "/checkpoints — показать pinned facts текущей ветки.",
+      "  /checkpoints <номер> — открыть указанную страницу.",
+      "  /checkpoints --full — показать полный текст facts вместо кратких превью.",
+      "",
+      "/checkpoint-forget <id> — аннулировать pinned fact, который больше не нужен.",
+      "/checkpoint-compact-journal — сжать журнал изменений pinned facts в snapshot.",
+      "",
+      "/analyze-dialog — проанализировать текущий диалог текущей chat-моделью.",
+      "  /analyze-dialog help — показать эту справку.",
+      "  /analyze-dialog — оценить качество текущего диалога.",
+      "  /analyze-dialog compact — оценить диалог с compacted smart-compact context.",
+      "  /analyze-dialog counterfactual — сравнить BASELINE и COMPACT через paired replay.",
+      "  /analyze-dialog compact replay — то же, что counterfactual.",
+      "  /analyze-dialog compare previous — сравнить текущую сессию с предыдущей сессией проекта.",
+      "  /analyze-dialog compare <session.jsonl> — сравнить текущую с указанной сессией.",
+      "  /analyze-dialog subagents — найти дочерние/subagent-сессии, запущенные из текущего чата.",
+      "  /analyze-dialog subagent <index|id|path> — проанализировать выбранную subagent-сессию.",
+      "  /analyze-dialog status — показать модель анализа, replay target и источники конфигурации.",
+      "  /analyze-dialog status --json — вывести эту конфигурацию в JSON.",
+      "",
+      "Модель анализа в Pi берётся из текущего чата. PI_BENCH_MODEL используется только как fallback, когда активная модель чата недоступна.",
+    ].join("\n");
+  }
   type AnalyzeDialogRequest =
     | { kind: "current" }
+    | { kind: "help" }
     | { kind: "compact" }
     | { kind: "counterfactual" }
     | { kind: "compare"; target: string }
@@ -1686,6 +1721,11 @@ export default function (pi: ExtensionAPI) {
     const firstSpace = input.indexOf(" ");
     const command = (firstSpace === -1 ? input : input.slice(0, firstSpace)).toLowerCase();
     const rest = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();
+
+    if (command === "help" || command === "-h" || command === "--help") {
+      if (rest) throw new Error("Usage: /analyze-dialog help");
+      return { kind: "help" };
+    }
 
     if (command === "status") {
       if (!rest || rest === "--json") return { kind: "status", json: rest === "--json" };
@@ -1718,7 +1758,7 @@ export default function (pi: ExtensionAPI) {
       return { kind: "compare", target: rest };
     }
 
-    throw new Error("Usage: /analyze-dialog [status [--json]] | subagents [<target>] | subagent <id|index|path> | compact [replay] | counterfactual | compare previous|<session.jsonl>");
+    throw new Error("Usage: /analyze-dialog [help|status [--json]] | subagents [<target>] | subagent <id|index|path> | compact [replay] | counterfactual | compare previous|<session.jsonl>");
   }
 
   function dialogAnalyzerScriptPath(): string {
@@ -2423,6 +2463,10 @@ export default function (pi: ExtensionAPI) {
   async function handleAnalyzeDialogCommand(args: string, ctx: ExtensionContext): Promise<void> {
     try {
       const request = parseAnalyzeDialogArgs(args);
+      if (request.kind === "help") {
+        notify(ctx, renderCommandHelp(), "info");
+        return;
+      }
       if (request.kind === "status") {
         const status = await getAnalyzeDialogStatus(ctx);
         notify(ctx, request.json ? JSON.stringify(status) : formatAnalyzeDialogStatus(status), "info");
@@ -2515,6 +2559,10 @@ export default function (pi: ExtensionAPI) {
     description: "Enable, disable, or inspect smart-compact for the current Pi session",
     handler: async (args, ctx) => {
       const command = args.trim().toLowerCase();
+      if (command === "help" || command === "-h" || command === "--help") {
+        notify(ctx, renderCommandHelp(), "info");
+        return;
+      }
       if (command === "" || command === "on" || command === "enable") {
         setEnabled(true, ctx);
         notify(ctx, "smart-compact enabled for this session.", "info");
@@ -2550,7 +2598,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("analyze-dialog", {
-    description: "Analyze the current dialogue, smart-compact context, compare sessions, or inspect analyzer model configuration",
+    description: "Анализировать диалоги, smart-compact context, сессии и конфигурацию модели",
     handler: async (args, ctx) => {
       if (!ctx.isIdle()) await ctx.waitForIdle();
       await handleAnalyzeDialogCommand(args, ctx);
@@ -2952,7 +3000,7 @@ export default function (pi: ExtensionAPI) {
   // ---------------------------------------------------------------------------
 
   pi.registerCommand("checkpoints", {
-    description: t("cmdCheckpoints"),
+    description: "Показать pinned facts текущей ветки; поддерживаются страницы и --full",
     handler: async (args, ctx) => {
       if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -2980,7 +3028,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("checkpoint-forget", {
-    description: t("cmdForget"),
+    description: "Аннулировать pinned fact по ID",
     handler: async (args, ctx) => {
       if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       const id = args.trim();
@@ -2997,7 +3045,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("checkpoint-compact-journal", {
-    description: t("cmdCompact"),
+    description: "Сжать журнал pinned facts в единый snapshot",
     handler: async (_args, ctx) => {
       if (!enabled) { notify(ctx, "smart-compact is disabled for this session. Use /smart-compact on.", "warning"); return; }
       if (pinnedFacts.size === 0 && revokedTombstones.size === 0) {

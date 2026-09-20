@@ -5,7 +5,7 @@ const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf
 const benchSource = fs.readFileSync(new URL('../bench/analyze-dialog.mjs', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.10.0');
+assert.equal(pkg.version, '3.10.1');
 assert.match(source, /const initialRuntimeEnabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
 assert.match(source, /let enabled = initialRuntimeEnabled;/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
@@ -26,7 +26,10 @@ assert.match(benchSource, /PI_REPLAY_MODEL/);
 assert.match(source, /if \(!enabled\) return \{/);
 assert.deepEqual(pkg.pi.extensions, ['./src/index.ts']);
 assert.match(source, /pi\.registerCommand\("analyze-dialog"/);
-assert.match(source, /Usage: \/analyze-dialog \[status \[--json\]\] \| subagents \[<target>\] \| subagent <id\|index\|path>/);
+assert.match(source, /Usage: \/analyze-dialog \[help\|status \[--json\]\] \| subagents \[<target>\] \| subagent <id\|index\|path>/);
+assert.match(source, /function renderCommandHelp\(\): string/);
+assert.match(source, /\/smart-compact help — показать эту справку/);
+assert.match(source, /\/analyze-dialog help — показать эту справку/);
 assert.match(source, /PI_BENCH_MODEL/);
 assert.match(source, /getAnalyzeDialogStatus/);
 assert.match(source, /parseDotEnv/);

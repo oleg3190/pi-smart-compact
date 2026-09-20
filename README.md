@@ -1,5 +1,11 @@
 # pi-smart-compact
 
+## 3.10.1
+
+- Added `/smart-compact help` with a Russian reference for every slash command and its purpose.
+- Added `/analyze-dialog help` as an entry point to the same command reference.
+- Slash-command descriptions in Pi's command palette are now Russian.
+
 ## 3.10.0
 
 - `/analyze-dialog` now uses the active model and thinking level of the current Pi chat by default; `PI_BENCH_MODEL` is only a fallback when no active chat model is available.
@@ -86,7 +92,7 @@ pi install git:github.com/oleg3190/pi-smart-compact
 
 The package entry point is `./src/index.ts`.
 
-The package is intended to be installed globally. After installation, smart-compact is **disabled by default** unless `PI_SMART_COMPACT=on` (or `1`/`true`) is set. In an interactive session use `/smart-compact on`, `/smart-compact off`, or `/smart-compact status`.
+The package is intended to be installed globally. After installation, smart-compact is **disabled by default** unless `PI_SMART_COMPACT=on` (or `1`/`true`) is set. In an interactive session use `/smart-compact on`, `/smart-compact off`, `/smart-compact status`, or `/smart-compact help` for the Russian command reference.
 
 For a dedicated agent/sub-agent, launch Pi with `PI_SMART_COMPACT=on`. For a clean agent, omit the variable and leave the extension installed but inactive.
 
@@ -117,4 +123,4 @@ The deterministic benchmark intentionally does not call an external LLM in CI. F
 npm run bench:dialog -- --dialog ./dialog.jsonl --model anthropic/claude-sonnet-4-5
 ```
 
-Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` remain available for standalone `npm run bench:dialog` runs and as fallbacks when the interactive chat has no active model. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator, replay target, and configuration source. Project `.env` / `.env.local` values remain supported as configuration fallbacks. For in-chat analysis, the active Pi model and thinking level take precedence automatically. `/analyze-dialog subagents` lists child sessions linked to the current chat, and `/analyze-dialog subagent <index|id|path>` analyzes a selected child session.
+Pass `--compact-context` and `--baseline-context` to compare task-relevant context preservation. Each report records the exact provider/model/thinking level, evaluator version, token usage, cost when reported, latency, and per-metric scores. `PI_BENCH_MODEL`, `PI_BENCH_PROVIDER`, and `PI_BENCH_THINKING` remain available for standalone `npm run bench:dialog` runs and as fallbacks when the interactive chat has no active model. In Pi, use `/analyze-dialog status` before a run to inspect the fixed evaluator, replay target, and configuration source. Project `.env` / `.env.local` values remain supported as configuration fallbacks. For in-chat analysis, the active Pi model and thinking level take precedence automatically. `/analyze-dialog help` shows the Russian command reference, `/analyze-dialog subagents` lists child sessions linked to the current chat, and `/analyze-dialog subagent <index|id|path>` analyzes a selected child session.
