@@ -142,7 +142,7 @@ try {
     "PI_BENCH_MODEL=anthropic/from-project-dotenv\nPI_BENCH_THINKING=low\n",
     "utf8",
   );
-  const envHarness = makeHarness([], "normal", true, envDir, undefined);
+  const envHarness = makeHarness([], "normal", true, envDir, null);
   await envHarness.commands.get("analyze-dialog")?.handler("status", envHarness.ctx);
   assert.match(envHarness.notifications.at(-1).text, /analysis model: anthropic\/from-project-dotenv \(\.env\)/);
   assert.match(envHarness.notifications.at(-1).text, /replay thinking: low/);
