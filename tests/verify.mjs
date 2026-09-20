@@ -5,7 +5,7 @@ const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf
 const benchSource = fs.readFileSync(new URL('../bench/analyze-dialog.mjs', import.meta.url), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-assert.equal(pkg.version, '3.10.2');
+assert.equal(pkg.version, '3.10.3');
 assert.match(source, /const initialRuntimeEnabled = \/\^\(1\|true\|on\)\$\/i\.test\(process\.env\.PI_SMART_COMPACT/);
 assert.match(source, /let enabled = initialRuntimeEnabled;/);
 assert.match(source, /pi\.registerCommand\("smart-compact"/);
@@ -31,6 +31,9 @@ assert.match(source, /function renderCommandHelp\(\): string/);
 assert.match(source, /\/smart-compact help — показать эту справку/);
 assert.match(source, /\/analyze-dialog help — показать эту справку/);
 assert.match(source, /PI_BENCH_MODEL/);
+assert.match(benchSource, /dialogue_evaluation_result/);
+assert.match(benchSource, /dialogue_comparison_result/);
+assert.match(benchSource, /createEvaluatorTool/);
 assert.match(source, /getAnalyzeDialogStatus/);
 assert.match(source, /parseDotEnv/);
 assert.match(source, /loadAnalyzeDialogConfig/);

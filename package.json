@@ -1,6 +1,6 @@
 {
   "name": "pi-smart-compact",
-  "version": "3.10.2",
+  "version": "3.10.3",
   "description": "Branch-scoped pinned memory extension for Pi with token-efficient context packing and deterministic journal replay.",
   "type": "module",
   "license": "MIT",
